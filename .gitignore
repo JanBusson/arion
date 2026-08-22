@@ -1,0 +1,37 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Local verification tools
+.tools/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+backend/.venv/
+data/
+backend/data/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Audio belongs on server storage, not in Git
+*.aac
+*.flac
+*.m4a
+*.mp3
+*.ogg
+*.opus
+*.wav
+
+# Database dumps and generated media-test output
+*.dump
+*.sql.gz
+generated-media/

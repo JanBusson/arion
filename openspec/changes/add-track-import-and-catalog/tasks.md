@@ -49,7 +49,7 @@
 
 - [x] 8.1 Extend Compose with a pinned PostgreSQL service, health check, persistent database/media volumes, one-shot migration service, API dependency ordering, and loopback binding by default; verify `docker compose config` succeeds without embedding secrets.
 - [x] 8.2 Verify the Compose lifecycle on a clean local project: build, migrate, become ready, import generated audio, restart containers, retain the track/media, and shut down without deleting named volumes.
-- [ ] 8.3 Extend GitHub Actions with PostgreSQL, migration, real media-tool tests, the complete backend suite, and the production container build; verify the workflow syntax is valid and all jobs pass on a branch or pull request.
+- [x] 8.3 Extend GitHub Actions with PostgreSQL, migration, real media-tool tests, the complete backend suite, and the production container build; verify the workflow syntax is valid and all jobs pass on a branch or pull request.
 
 ## 9. Developer and server operations documentation
 

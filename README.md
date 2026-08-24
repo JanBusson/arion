@@ -1,14 +1,14 @@
 # Arion
 
-Arion is a private, self-hosted music application and a learning project for backend, data, container, and deployment practices. The current milestone provides a FastAPI backend that imports one audio file at a time, extracts metadata, stores media on the local server, exposes a persistent searchable track catalog, and streams original audio with HTTP byte-range seeking.
+Arion is a private, self-hosted music application and a learning project for backend, data, container, and deployment practices. The FastAPI backend imports audio, extracts metadata, stores media on the local server, exposes a searchable catalog, and streams original audio with HTTP byte-range seeking. One Flutter client connects from Android or a development web server to search the library and play tracks.
 
-Flutter clients, playlists, authentication, public exposure, online metadata services, transcoding, and automated deployment are not implemented yet.
+Playlists, authentication, public exposure, online metadata services, transcoding, background playback, and automated deployment are not implemented yet.
 
 ## Repository structure
 
 ```text
 .
-|-- .github/workflows/ci.yml       # PostgreSQL tests and production image build
+|-- .github/workflows/ci.yml       # Backend and pinned-SDK Flutter validation
 |-- backend/
 |   |-- migrations/                # Alembic schema history
 |   |-- src/arion_api/             # API, services, persistence, metadata, storage
@@ -16,7 +16,9 @@ Flutter clients, playlists, authentication, public exposure, online metadata ser
 |   |-- Dockerfile                 # Non-root production and explicit test targets
 |   |-- pyproject.toml             # Python project and dependency constraints
 |   `-- uv.lock                    # Reproducible dependency lock
+|-- client/                        # Flutter Android/web app and tests
 |-- docs/server.md                 # Rootless-Docker Linux runbook
+|-- .flutter-version               # Pinned Flutter stable SDK version
 |-- .env.example                   # Non-secret configuration example
 `-- compose.yaml                   # API, migration job, and PostgreSQL
 ```
@@ -28,6 +30,14 @@ For direct backend development:
 - `uv` 0.12.5 and Python 3.13
 - PostgreSQL 18
 - FFmpeg/`ffprobe` 7 or later
+
+For client development:
+
+- Flutter 3.44.7 stable (the version in `.flutter-version`)
+- Chrome or Edge for web development
+- Android Studio/Android SDK plus an emulator or connected device for APK work
+
+Run `flutter doctor -v` after installing Flutter. The web toolchain should list an available browser; Android builds additionally require an accepted and healthy Android toolchain.
 
 For the recommended container workflow:
 
@@ -58,6 +68,7 @@ cp .env.example .env
 | `ARION_FFPROBE_EXECUTABLE` | `ffprobe` | Probe executable name or path |
 | `ARION_FFPROBE_TIMEOUT_SECONDS` | `30` | Maximum probe duration |
 | `ARION_RECONCILIATION_GRACE_SECONDS` | `3600` | Minimum age before crash artifacts can be removed |
+| `ARION_CORS_ORIGINS` | empty | Comma-separated exact browser origins allowed to call the API |
 | `ARION_BIND_ADDRESS` | `127.0.0.1` | Host address where Compose publishes the API |
 | `ARION_PORT` | `8000` | Published host port |
 
@@ -72,7 +83,7 @@ docker compose up --detach --build
 docker compose ps --all
 ```
 
-Verify process liveness and dependency readiness:
+Verify the API:
 
 ```bash
 curl --fail http://127.0.0.1:8000/health
@@ -108,6 +119,48 @@ uv run --frozen --project backend uvicorn arion_api.main:app --reload --host 127
 ```
 
 Compose does not publish PostgreSQL by default. Prefer running the whole stack unless direct host debugging requires a temporary loopback-only database-port override.
+
+## Run the Flutter client
+
+Install the committed application dependencies from the repository root:
+
+```bash
+cd client
+flutter pub get --enforce-lockfile
+```
+
+On first launch, Arion asks for an absolute API URL such as `http://192.168.1.50:8000`. The accepted value is normalized and saved locally, and it can be changed later from Settings. A development or CI build can provide an initial value without embedding a production address in source code:
+
+```bash
+flutter run -d chrome --web-port 8080 \
+  --dart-define=ARION_API_BASE_URL=http://127.0.0.1:8000
+```
+
+A saved setting takes precedence over `ARION_API_BASE_URL`. A separately served development client requires its exact origin in the backend allow-list. For the command above, use this `.env` value and restart the API:
+
+```dotenv
+ARION_CORS_ORIGINS=http://localhost:8080
+```
+
+Multiple separate development origins are comma-separated. Do not use `*`; an empty value is the default and grants no cross-origin browser access.
+
+Run client checks and create the web release:
+
+```bash
+dart format --output=none --set-exit-if-changed .
+flutter analyze
+flutter test
+flutter build web --release --no-web-resources-cdn
+```
+
+Build and install an Android debug APK when the Android toolchain is available:
+
+```bash
+flutter build apk --debug
+adb install -r build/app/outputs/flutter-apk/app-debug.apk
+```
+
+Android permits owner-configured cleartext HTTP so it can reach a private LAN server. Keep the API bound to the private network and send no credentials over HTTP. Prefer HTTPS or Tailscale before any remote access, and do not expose Arion through public port forwarding by default.
 
 ## Import and use the catalog
 
@@ -193,6 +246,7 @@ GitHub Actions uses hosted runners for pull requests and pushes to `main` or `ma
 - starts a disposable PostgreSQL 18 service
 - verifies migration upgrade, downgrade, and re-upgrade
 - runs all unit, real-parser, PostgreSQL concurrency, and API tests
+- installs Flutter 3.44.7, verifies formatting and analysis, runs client tests, and builds the web release
 - builds the non-root production image without publishing it
 
 No deployment or registry credentials are used in this milestone. See [the Linux server runbook](docs/server.md) for manual private deployment and persistent-volume operations.

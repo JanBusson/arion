@@ -1,6 +1,6 @@
 # Arion
 
-Arion is a private, self-hosted music application and a learning project for backend, data, container, and deployment practices. The FastAPI backend imports audio, extracts metadata, stores media on the local server, exposes a searchable catalog, and streams original audio with HTTP byte-range seeking. One Flutter client connects from Android or a development web server to search the library and play tracks.
+Arion is a private, self-hosted music application and a learning project for backend, data, container, and deployment practices. The FastAPI backend imports audio, extracts metadata, stores media on the local server, exposes a searchable catalog, and streams original audio with HTTP byte-range seeking. One Flutter client connects from Android or is served through the private web gateway to search the library and play tracks.
 
 Playlists, authentication, public exposure, online metadata services, transcoding, background playback, and automated deployment are not implemented yet.
 
@@ -16,11 +16,12 @@ Playlists, authentication, public exposure, online metadata services, transcodin
 |   |-- Dockerfile                 # Non-root production and explicit test targets
 |   |-- pyproject.toml             # Python project and dependency constraints
 |   `-- uv.lock                    # Reproducible dependency lock
-|-- client/                        # Flutter Android/web app and tests
+|-- client/                        # Flutter app, production web image, Nginx gateway, and tests
 |-- docs/server.md                 # Rootless-Docker Linux runbook
+|-- scripts/                       # Compose and black-box web gateway verification
 |-- .flutter-version               # Pinned Flutter stable SDK version
 |-- .env.example                   # Non-secret configuration example
-`-- compose.yaml                   # API, migration job, and PostgreSQL
+`-- compose.yaml                   # Web gateway, API, migration job, and PostgreSQL
 ```
 
 ## Prerequisites
@@ -43,6 +44,8 @@ For the recommended container workflow:
 
 - Docker Engine or Docker Desktop
 - Docker Compose v2 (`docker compose`)
+
+The production web image downloads and verifies the pinned Flutter SDK while building, so the Docker Compose workflow does not require Flutter on the host.
 
 ## Configuration
 
@@ -71,6 +74,10 @@ cp .env.example .env
 | `ARION_CORS_ORIGINS` | empty | Comma-separated exact browser origins allowed to call the API |
 | `ARION_BIND_ADDRESS` | `127.0.0.1` | Host address where Compose publishes the API |
 | `ARION_PORT` | `8000` | Published host port |
+| `ARION_WEB_BIND_ADDRESS` | `127.0.0.1` | Host address where Compose publishes the web/API gateway |
+| `ARION_WEB_PORT` | `8080` | Published web/API gateway port |
+| `ARION_API_IMAGE` | `arion-api:local` | API/migration image name; override for isolated or versioned builds |
+| `ARION_WEB_IMAGE` | `arion-web:local` | Web gateway image name; override for isolated or versioned builds |
 
 Do not commit `.env`, database dumps, credentials, private keys, real audio, or generated media.
 
@@ -83,11 +90,14 @@ docker compose up --detach --build
 docker compose ps --all
 ```
 
-Verify the API:
+Verify the direct API and the published web gateway:
 
 ```bash
 curl --fail http://127.0.0.1:8000/health
 curl --fail http://127.0.0.1:8000/ready
+curl --fail http://127.0.0.1:8080/
+curl --fail http://127.0.0.1:8080/health
+curl --fail http://127.0.0.1:8080/ready
 ```
 
 Expected healthy responses are `{"status":"ok"}` and `{"status":"ready"}`. `/health` deliberately remains healthy during database or media-storage outages; `/ready` returns `503` and safe dependency states.
@@ -95,11 +105,33 @@ Expected healthy responses are `{"status":"ok"}` and `{"status":"ready"}`. `/hea
 View logs or stop containers without deleting data:
 
 ```bash
-docker compose logs --follow api migrate db
+docker compose logs --follow web api migrate db
 docker compose down
 ```
 
 Do not add `--volumes` unless permanent database and media deletion is explicitly intended and backed up.
+
+### Use the production web gateway
+
+Open `http://127.0.0.1:8080` after the stack is healthy. On first launch, enter that same origin, `http://127.0.0.1:8080`, as the Arion API address. Catalog, cover, and audio requests then use the gateway's same-origin `/api/` proxy, while `/health` and `/ready` expose the existing safe operational responses.
+
+For private-LAN use, keep the direct API on loopback and publish only the gateway on the server's fixed LAN address:
+
+```dotenv
+ARION_BIND_ADDRESS=127.0.0.1
+ARION_WEB_BIND_ADDRESS=192.168.1.50
+ARION_WEB_PORT=8080
+```
+
+Then open `http://192.168.1.50:8080` and enter that exact origin in the client. Android can use the same gateway address. The loopback defaults prevent implicit publication on all interfaces; do not replace either address with `0.0.0.0` as an ad hoc fix.
+
+Build only the deployable web image when needed:
+
+```bash
+docker compose build web
+```
+
+The multi-stage build verifies the official Flutter 3.44.7 archive checksum and copies only `build/web` into a pinned unprivileged Nginx runtime. Source maps are not produced, and the runtime contains neither the Flutter toolchain nor the client source tree.
 
 ## Run directly for development
 
@@ -142,7 +174,7 @@ A saved setting takes precedence over `ARION_API_BASE_URL`. A separately served 
 ARION_CORS_ORIGINS=http://localhost:8080
 ```
 
-Multiple separate development origins are comma-separated. Do not use `*`; an empty value is the default and grants no cross-origin browser access.
+Multiple separate development origins are comma-separated. Do not use `*`; an empty value is the default and grants no cross-origin browser access. The production gateway is same-origin and does not require a CORS entry.
 
 Run client checks and create the web release:
 
@@ -238,6 +270,17 @@ The container test target also contains the locked dev dependencies and suite:
 docker build --target test --tag arion-api:test ./backend
 ```
 
+With the disposable Compose stack running, exercise the production gateway and compare proxied audio responses with direct FastAPI responses:
+
+```bash
+docker compose config --format json | python scripts/verify_compose_config.py
+python scripts/verify_web_gateway.py \
+  --base-url http://127.0.0.1:8080 \
+  --direct-api-url http://127.0.0.1:8000
+```
+
+The gateway check creates a unique tiny synthetic WAV in the configured development stack. Do not run it against production data. CI also stops its disposable API briefly and verifies that the gateway returns a non-cacheable error rather than the Flutter application shell.
+
 ## Continuous integration
 
 GitHub Actions uses hosted runners for pull requests and pushes to `main` or `master`. It:
@@ -248,5 +291,6 @@ GitHub Actions uses hosted runners for pull requests and pushes to `main` or `ma
 - runs all unit, real-parser, PostgreSQL concurrency, and API tests
 - installs Flutter 3.44.7, verifies formatting and analysis, runs client tests, and builds the web release
 - builds the non-root production image without publishing it
+- renders and checks loopback/private-LAN Compose bindings, builds the production web image, starts a disposable stack, and verifies static routes, proxying, caching, health, failure handling, and ranged playback
 
 No deployment or registry credentials are used in this milestone. See [the Linux server runbook](docs/server.md) for manual private deployment and persistent-volume operations.

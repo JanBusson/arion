@@ -47,3 +47,9 @@ class CoverNotFoundError(ArionError):
     status_code = 404
     code = "cover_not_found"
     public_message = "Cover art not found."
+
+
+class AudioNotFoundError(ArionError):
+    status_code = 404
+    code = "audio_not_found"
+    public_message = "Track audio not found."

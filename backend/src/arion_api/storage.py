@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
@@ -13,6 +13,15 @@ from uuid import uuid4
 
 Namespace = Literal["staging", "audio", "covers"]
 _SAFE_SUFFIX = re.compile(r"^\.[a-z0-9]{1,10}$")
+AUDIO_READ_CHUNK_BYTES = 64 * 1024
+_AUDIO_MEDIA_TYPES = {
+    ".mp3": "audio/mpeg",
+    ".flac": "audio/flac",
+    ".m4a": "audio/mp4",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".wav": "audio/wav",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +44,12 @@ class StorageKey:
         return self.value.split("/", 1)[0]  # type: ignore[return-value]
 
 
+@dataclass(frozen=True, slots=True)
+class StoredAudio:
+    size: int
+    media_type: str
+
+
 class MediaStorage(Protocol):
     def create_staging(self, suffix: str = ".upload") -> StorageKey: ...
 
@@ -47,6 +62,16 @@ class MediaStorage(Protocol):
     ) -> StorageKey: ...
 
     def read_bytes(self, key: StorageKey) -> bytes: ...
+
+    def audio_info(self, key: StorageKey) -> StoredAudio: ...
+
+    def iter_bytes(
+        self,
+        key: StorageKey,
+        start: int,
+        end: int,
+        chunk_size: int = AUDIO_READ_CHUNK_BYTES,
+    ) -> Iterator[bytes]: ...
 
     def remove(self, key: StorageKey) -> None: ...
 
@@ -103,6 +128,49 @@ class LocalMediaStorage:
 
     def read_bytes(self, key: StorageKey) -> bytes:
         return self._path(key).read_bytes()
+
+    def audio_info(self, key: StorageKey) -> StoredAudio:
+        if key.namespace != "audio":
+            raise ValueError("only audio objects have audio metadata")
+        path = self._path(key)
+        suffix = path.suffix.lower()
+        try:
+            media_type = _AUDIO_MEDIA_TYPES[suffix]
+        except KeyError as error:
+            raise ValueError("unsupported stored audio suffix") from error
+        return StoredAudio(size=path.stat().st_size, media_type=media_type)
+
+    def iter_bytes(
+        self,
+        key: StorageKey,
+        start: int,
+        end: int,
+        chunk_size: int = AUDIO_READ_CHUNK_BYTES,
+    ) -> Iterator[bytes]:
+        if key.namespace != "audio":
+            raise ValueError("only audio objects can be streamed")
+        if start < 0 or end < start:
+            raise ValueError("invalid inclusive byte interval")
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be positive")
+
+        path = self._path(key)
+        object_size = path.stat().st_size
+        if end >= object_size:
+            raise ValueError("byte interval exceeds the object")
+
+        def chunks() -> Iterator[bytes]:
+            remaining = end - start + 1
+            with path.open("rb") as stream:
+                stream.seek(start)
+                while remaining:
+                    chunk = stream.read(min(chunk_size, remaining))
+                    if not chunk:
+                        raise OSError("stored audio ended before the requested range")
+                    remaining -= len(chunk)
+                    yield chunk
+
+        return chunks()
 
     def remove(self, key: StorageKey) -> None:
         self._path(key).unlink(missing_ok=True)

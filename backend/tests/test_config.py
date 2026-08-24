@@ -12,6 +12,7 @@ def test_settings_use_development_defaults(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.delenv("ARION_FFPROBE_EXECUTABLE", raising=False)
     monkeypatch.delenv("ARION_FFPROBE_TIMEOUT_SECONDS", raising=False)
     monkeypatch.delenv("ARION_RECONCILIATION_GRACE_SECONDS", raising=False)
+    monkeypatch.delenv("ARION_CORS_ORIGINS", raising=False)
 
     settings = Settings(_env_file=None)
 
@@ -22,6 +23,44 @@ def test_settings_use_development_defaults(monkeypatch: pytest.MonkeyPatch) -> N
     assert settings.ffprobe_executable == "ffprobe"
     assert settings.ffprobe_timeout_seconds == 30
     assert settings.reconciliation_grace_seconds == 3600
+    assert settings.cors_origins == []
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("http://localhost:8080", ["http://localhost:8080"]),
+        (
+            "http://localhost:8080, https://arion.test/",
+            ["http://localhost:8080", "https://arion.test"],
+        ),
+    ],
+)
+def test_settings_parse_exact_cors_origins(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: list[str]
+) -> None:
+    monkeypatch.setenv("ARION_CORS_ORIGINS", raw)
+
+    assert Settings(_env_file=None).cors_origins == expected
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "localhost:8080",
+        "ftp://arion.test",
+        "http://user:password@arion.test",
+        "http://arion.test/path",
+        "http://arion.test?query=value",
+    ],
+)
+def test_settings_reject_invalid_cors_origins(
+    monkeypatch: pytest.MonkeyPatch, origin: str
+) -> None:
+    monkeypatch.setenv("ARION_CORS_ORIGINS", origin)
+
+    with pytest.raises(ValidationError, match="cors_origins"):
+        Settings(_env_file=None)
 
 
 def test_settings_reject_invalid_log_level(

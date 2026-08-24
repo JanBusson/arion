@@ -9,6 +9,7 @@ x-api-environment: &api-environment
   ARION_FFPROBE_EXECUTABLE: ${ARION_FFPROBE_EXECUTABLE:-ffprobe}
   ARION_FFPROBE_TIMEOUT_SECONDS: ${ARION_FFPROBE_TIMEOUT_SECONDS:-30}
   ARION_RECONCILIATION_GRACE_SECONDS: ${ARION_RECONCILIATION_GRACE_SECONDS:-3600}
+  ARION_CORS_ORIGINS: ${ARION_CORS_ORIGINS:-}
 
 services:
   db:
@@ -27,7 +28,7 @@ services:
     restart: unless-stopped
 
   migrate:
-    image: arion-api:local
+    image: ${ARION_API_IMAGE:-arion-api:local}
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -39,7 +40,7 @@ services:
     restart: "no"
 
   api:
-    image: arion-api:local
+    image: ${ARION_API_IMAGE:-arion-api:local}
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -63,6 +64,38 @@ services:
       timeout: 3s
       start_period: 10s
       retries: 6
+    restart: unless-stopped
+
+  web:
+    image: ${ARION_WEB_IMAGE:-arion-web:local}
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+      target: production
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${ARION_WEB_BIND_ADDRESS:-127.0.0.1}:${ARION_WEB_PORT:-8080}:8080"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-T",
+          "2",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:8080/index.html",
+        ]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 6
+    read_only: true
+    tmpfs:
+      - /tmp
     restart: unless-stopped
 
 volumes:

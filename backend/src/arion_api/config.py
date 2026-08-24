@@ -2,10 +2,11 @@
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
+from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, SecretStr, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -21,6 +22,7 @@ class Settings(BaseSettings):
     ffprobe_executable: str = Field(default="ffprobe", min_length=1)
     ffprobe_timeout_seconds: float = Field(default=30.0, gt=0)
     reconciliation_grace_seconds: int = Field(default=3600, ge=0)
+    cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -28,6 +30,48 @@ class Settings(BaseSettings):
         extra="ignore",
         case_sensitive=False,
     )
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, value: object) -> object:
+        """Accept a comma-separated environment value or an explicit list."""
+
+        if isinstance(value, str):
+            if not value.strip():
+                return []
+            return [origin.strip() for origin in value.split(",")]
+        return value
+
+    @field_validator("cors_origins")
+    @classmethod
+    def validate_cors_origins(cls, origins: list[str]) -> list[str]:
+        """Require normalized HTTP(S) origins without paths or credentials."""
+
+        normalized: list[str] = []
+        for origin in origins:
+            try:
+                parsed = urlsplit(origin)
+                port = parsed.port
+            except ValueError as error:
+                raise ValueError(f"invalid CORS origin: {origin}") from error
+            if (
+                parsed.scheme not in {"http", "https"}
+                or parsed.hostname is None
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.path not in {"", "/"}
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError(f"invalid CORS origin: {origin}")
+            host = parsed.hostname.lower()
+            if ":" in host:
+                host = f"[{host}]"
+            authority = f"{host}:{port}" if port is not None else host
+            exact_origin = f"{parsed.scheme.lower()}://{authority}"
+            if exact_origin not in normalized:
+                normalized.append(exact_origin)
+        return normalized
 
 
 @lru_cache

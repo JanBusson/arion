@@ -65,6 +65,40 @@ jobs:
       - name: Run backend tests
         run: uv run --frozen --project backend pytest backend/tests
 
+  flutter-client:
+    name: Flutter client
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.7"
+          channel: stable
+          cache: true
+
+      - name: Install locked dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Check formatting
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Run static analysis
+        run: flutter analyze
+
+      - name: Run Flutter tests
+        run: flutter test
+
+      - name: Build web client
+        run: flutter build web --release --no-web-resources-cdn
+
   backend-image:
     name: Backend image build
     runs-on: ubuntu-latest
@@ -81,3 +115,63 @@ jobs:
           file: ./backend/Dockerfile
           push: false
           tags: arion-api:ci
+
+  web-gateway:
+    name: Production web gateway
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify default Compose model
+        run: docker compose config --format json | python scripts/verify_compose_config.py
+
+      - name: Verify private-LAN Compose override
+        env:
+          ARION_WEB_BIND_ADDRESS: 192.0.2.10
+          ARION_WEB_PORT: "18080"
+        run: >-
+          docker compose config --format json |
+          python scripts/verify_compose_config.py
+          --expected-web-host 192.0.2.10
+          --expected-web-port 18080
+
+      - name: Build and start production stack
+        run: docker compose up --detach --build --wait --wait-timeout 240
+
+      - name: Inspect minimal unprivileged runtime
+        run: |
+          test "$(docker image inspect arion-web:local --format '{{.Config.User}}')" = "101:101"
+          docker run --rm --entrypoint sh arion-web:local -ec '
+            test -s /usr/share/nginx/html/index.html
+            test ! -e /opt/flutter
+            test ! -e /src
+            test ! -e /.git
+            test ! -e /.env
+            test ! -e /root/.pub-cache
+          '
+
+      - name: Verify static, proxy, cache, health, and range behavior
+        run: >-
+          python scripts/verify_web_gateway.py
+          --base-url http://127.0.0.1:8080
+          --direct-api-url http://127.0.0.1:8000
+
+      - name: Verify unavailable API response
+        run: |
+          docker compose stop api
+          python scripts/verify_web_gateway.py \
+            --base-url http://127.0.0.1:8080 \
+            --expect-api-unavailable
+
+      - name: Show service state and logs on failure
+        if: failure()
+        run: |
+          docker compose ps --all
+          docker compose logs --no-color db migrate api web
+
+      - name: Stop disposable stack
+        if: always()
+        run: docker compose down --volumes --remove-orphans

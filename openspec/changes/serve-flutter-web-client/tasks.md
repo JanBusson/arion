@@ -20,7 +20,7 @@
 ## 4. Automation and Operations
 
 - [x] 4.1 Add reusable black-box gateway checks to the repository and verify they fail for incorrect proxy, SPA fallback, cache, health, or range behavior and pass against the production web image.
-- [ ] 4.2 Extend GitHub Actions to build the production web image and run the black-box gateway checks alongside existing Flutter validation; verify the workflow syntax and all backend, Flutter, container, and integration jobs pass on a clean run.
+- [x] 4.2 Extend GitHub Actions to build the production web image and run the black-box gateway checks alongside existing Flutter validation; verify the workflow syntax and all backend, Flutter, container, and integration jobs pass on a clean run.
 - [x] 4.3 Update the README and `.env.example` with image/build commands, loopback defaults, browser first-run configuration using the current gateway origin, Android gateway use, CORS-only development guidance, and private-LAN examples; verify every documented command and URL matches the rendered Compose configuration.
 - [x] 4.4 Update the Linux server runbook with trusted-checkout deployment, health and log checks, gateway-first bind settings, update order, smoke tests, and rollback to direct API access; verify the procedure does not require public exposure, TLS, database publication, volume deletion, or a host Flutter SDK.
 - [x] 4.5 Run the complete documented verification suite and a browser playback smoke test through the gateway, recording successful formatting, analysis, Flutter tests, backend tests, image build, Compose validation, static/proxy checks, and ranged seeking before marking the change complete.

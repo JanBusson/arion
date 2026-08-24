@@ -1,8 +1,8 @@
 # Arion
 
-Arion is a private, self-hosted music application and a learning project for backend, data, container, and deployment practices. The current milestone provides a FastAPI backend that imports one audio file at a time, extracts metadata, stores media on the local server, and exposes a persistent searchable track catalog.
+Arion is a private, self-hosted music application and a learning project for backend, data, container, and deployment practices. The current milestone provides a FastAPI backend that imports one audio file at a time, extracts metadata, stores media on the local server, exposes a persistent searchable track catalog, and streams original audio with HTTP byte-range seeking.
 
-Audio playback/streaming, Flutter clients, playlists, authentication, public exposure, online metadata services, and automated deployment are not implemented yet.
+Flutter clients, playlists, authentication, public exposure, online metadata services, transcoding, and automated deployment are not implemented yet.
 
 ## Repository structure
 
@@ -140,7 +140,23 @@ curl --fail --output cover-image \
   http://127.0.0.1:8000/api/v1/tracks/<track-id>/cover
 ```
 
-Cover retrieval returns `404` when the track has no valid embedded JPEG/PNG cover. There is intentionally no audio download or streaming endpoint yet.
+Cover retrieval returns `404` when the track has no valid embedded JPEG/PNG cover.
+
+Stream the complete original audio object:
+
+```bash
+curl --fail --output track-audio \
+  http://127.0.0.1:8000/api/v1/tracks/<track-id>/audio
+```
+
+Request an inclusive byte range, as browser and Android players do when seeking:
+
+```bash
+curl --fail --header "Range: bytes=0-65535" --output first-audio-range \
+  http://127.0.0.1:8000/api/v1/tracks/<track-id>/audio
+```
+
+A complete request returns `200`; a satisfiable single range returns `206` with `Content-Range`, `Content-Length`, and `Accept-Ranges: bytes`. Bounded (`start-end`), open-ended (`start-`), and suffix (`-length`) ranges are supported. Invalid, multiple, or unsatisfiable ranges return `416` with no audio bytes. Arion streams the imported object in bounded chunks with its canonical audio media type; it does not transcode or adapt bitrate.
 
 ## Migrations and tests
 

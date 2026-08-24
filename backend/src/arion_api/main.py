@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile
+from starlette.middleware.cors import CORSMiddleware
 
 from arion_api import __version__
 from arion_api.config import Settings, get_settings
@@ -81,6 +82,14 @@ def create_app(
     application = FastAPI(
         title="Arion API", version=__version__, lifespan=lifespan
     )
+    if selected_settings.cors_origins:
+        application.add_middleware(
+            CORSMiddleware,
+            allow_origins=selected_settings.cors_origins,
+            allow_methods=["GET", "HEAD"],
+            allow_headers=["Range"],
+            expose_headers=["Accept-Ranges", "Content-Length", "Content-Range"],
+        )
     application.state.settings = selected_settings
     application.state.session_factory = selected_factory
     application.state.storage = selected_storage

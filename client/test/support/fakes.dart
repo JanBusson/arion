@@ -138,12 +138,15 @@ final class FakeAudioPlayer implements AudioPlayerPort {
   final StreamController<Object> errors = StreamController.broadcast();
 
   Duration? sourceDuration = const Duration(minutes: 3);
+  Future<Duration?> Function(Uri uri, int call)? setUrlHandler;
   Object? setUrlError;
   Object? playError;
   Uri? currentUrl;
   Duration? lastSeek;
   int playCalls = 0;
   int pauseCalls = 0;
+  int setUrlCalls = 0;
+  final List<Uri> requestedUrls = [];
   bool disposed = false;
 
   @override
@@ -163,12 +166,18 @@ final class FakeAudioPlayer implements AudioPlayerPort {
 
   @override
   Future<Duration?> setUrl(Uri uri) async {
+    setUrlCalls += 1;
+    final call = setUrlCalls;
+    requestedUrls.add(uri);
     if (setUrlError != null) {
       throw setUrlError!;
     }
-    currentUrl = uri;
-    processing.add(AudioProcessingState.ready);
-    return sourceDuration;
+    final handledDuration = await setUrlHandler?.call(uri, call);
+    if (call == setUrlCalls) {
+      currentUrl = uri;
+      processing.add(AudioProcessingState.ready);
+    }
+    return setUrlHandler == null ? sourceDuration : handledDuration;
   }
 
   @override

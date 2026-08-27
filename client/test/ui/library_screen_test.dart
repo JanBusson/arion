@@ -1,5 +1,7 @@
-import 'package:arion_client/library/catalog_api.dart';
+import 'dart:async';
+
 import 'package:arion_client/library/acquisition.dart';
+import 'package:arion_client/library/catalog_api.dart';
 import 'package:arion_client/library/library_controller.dart';
 import 'package:arion_client/library/track.dart';
 import 'package:arion_client/playback/audio_player_port.dart';
@@ -326,7 +328,10 @@ void main() {
 
       await tester.tap(find.byTooltip('Play First track'));
       await tester.pumpAndSettle();
-      expect(player.currentUrl.toString(), contains('/audio/'));
+      expect(
+        player.currentUrl.toString(),
+        'http://arion.test/audio/00000000-0000-0000-0000-000000000001',
+      );
       expect(find.byKey(const Key('playback-toggle')), findsOneWidget);
 
       player.positions.add(const Duration(seconds: 30));
@@ -338,9 +343,21 @@ void main() {
       await tester.pump();
       expect(player.lastSeek, const Duration(minutes: 1));
 
+      final replacement = Completer<Duration?>();
+      player.setUrlHandler = (_, _) => replacement.future;
       await tester.tap(find.byTooltip('Play Second'));
+      await tester.pump();
+      expect(find.text('Loading audio…'), findsOneWidget);
+      expect(
+        player.currentUrl.toString(),
+        'http://arion.test/audio/00000000-0000-0000-0000-000000000001',
+      );
+
+      replacement.complete(const Duration(minutes: 4));
       await tester.pumpAndSettle();
       expect(find.text('Second'), findsWidgets);
+      expect(player.currentUrl.toString(), 'http://arion.test/audio/2');
+      expect(find.text('4:00'), findsOneWidget);
 
       player.processing.add(AudioProcessingState.completed);
       await tester.pumpAndSettle();

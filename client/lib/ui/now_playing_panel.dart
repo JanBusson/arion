@@ -18,7 +18,7 @@ final class NowPlayingPanel extends StatelessWidget {
         child: ListenableBuilder(
           listenable: controller,
           builder: (context, _) {
-            final track = controller.track;
+            final track = controller.visibleTrack;
             if (track == null) {
               return const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -46,7 +46,7 @@ final class NowPlayingPanel extends StatelessWidget {
                             : controller.isPlaying
                             ? 'Pause'
                             : 'Play',
-                        onPressed: controller.error == null
+                        onPressed: controller.canControlPlayback
                             ? controller.togglePlayback
                             : null,
                         icon: controller.isBuffering
@@ -76,7 +76,9 @@ final class NowPlayingPanel extends StatelessWidget {
                               style: Theme.of(context).textTheme.titleMedium,
                             ),
                             Text(
-                              '${track.artist} • ${track.album}',
+                              controller.isLoadingSelection
+                                  ? 'Loading audio…'
+                                  : '${track.artist} • ${track.album}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),

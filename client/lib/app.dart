@@ -4,6 +4,7 @@ import 'configuration/api_base_url.dart';
 import 'configuration/settings_controller.dart';
 import 'configuration/settings_store.dart';
 import 'library/catalog_api.dart';
+import 'library/acquisition_job_store.dart';
 import 'library/library_controller.dart';
 import 'playback/audio_player_port.dart';
 import 'playback/playback_controller.dart';
@@ -18,6 +19,7 @@ final class ArionApp extends StatefulWidget {
     required this.settingsStore,
     required this.catalogApiFactory,
     required this.audioPlayerFactory,
+    this.acquisitionJobStore,
     this.seedBaseUrl = const String.fromEnvironment('ARION_API_BASE_URL'),
     super.key,
   });
@@ -25,6 +27,7 @@ final class ArionApp extends StatefulWidget {
   final SettingsStore settingsStore;
   final CatalogApiFactory catalogApiFactory;
   final AudioPlayerFactory audioPlayerFactory;
+  final AcquisitionJobStore? acquisitionJobStore;
   final String seedBaseUrl;
 
   @override
@@ -33,6 +36,7 @@ final class ArionApp extends StatefulWidget {
 
 final class _ArionAppState extends State<ArionApp> {
   late final SettingsController _settings;
+  late final AcquisitionJobStore _jobStore;
   _ClientSession? _session;
 
   @override
@@ -42,6 +46,7 @@ final class _ArionAppState extends State<ArionApp> {
       widget.settingsStore,
       seedBaseUrl: widget.seedBaseUrl,
     );
+    _jobStore = widget.acquisitionJobStore ?? MemoryAcquisitionJobStore();
     _loadSettings();
   }
 
@@ -67,7 +72,10 @@ final class _ArionAppState extends State<ArionApp> {
       _session = baseUrl == null
           ? null
           : _ClientSession(
-              library: LibraryController(widget.catalogApiFactory(baseUrl)),
+              library: LibraryController(
+                widget.catalogApiFactory(baseUrl),
+                jobStore: _jobStore,
+              ),
               playback: PlaybackController(widget.audioPlayerFactory()),
             );
     });

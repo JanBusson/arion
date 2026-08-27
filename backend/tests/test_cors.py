@@ -72,6 +72,26 @@ def test_allowed_preflight_accepts_range_header(tmp_path: Path) -> None:
     assert "range" in response.headers["access-control-allow-headers"].lower()
 
 
+def test_allowed_preflight_accepts_acquisition_post_json(tmp_path: Path) -> None:
+    origin = "http://localhost:8080"
+    with make_client(tmp_path, [origin]) as client:
+        response = client.options(
+            "/api/v1/acquisition/jobs",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "Content-Type",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == origin
+    assert "content-type" in response.headers[
+        "access-control-allow-headers"
+    ].lower()
+
+
+
 def test_unconfigured_origin_is_not_allowed(tmp_path: Path) -> None:
     with make_client(tmp_path, ["http://localhost:8080"]) as client:
         response = client.get(

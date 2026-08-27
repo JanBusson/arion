@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -13,6 +14,7 @@ from uuid import uuid4
 
 Namespace = Literal["staging", "audio", "covers"]
 _SAFE_SUFFIX = re.compile(r"^\.[a-z0-9]{1,10}$")
+_WORKSPACE_ID = re.compile(r"^[a-f0-9]{32}$")
 AUDIO_READ_CHUNK_BYTES = 64 * 1024
 _AUDIO_MEDIA_TYPES = {
     ".mp3": "audio/mpeg",
@@ -42,6 +44,15 @@ class StorageKey:
     @property
     def namespace(self) -> Namespace:
         return self.value.split("/", 1)[0]  # type: ignore[return-value]
+
+
+@dataclass(frozen=True, slots=True)
+class StagingWorkspace:
+    value: str
+
+    def __post_init__(self) -> None:
+        if not _WORKSPACE_ID.fullmatch(self.value):
+            raise ValueError("invalid staging workspace")
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +112,81 @@ class LocalMediaStorage:
         path = self._path(key)
         path.touch(exist_ok=False)
         return key
+
+    def create_workspace(self) -> StagingWorkspace:
+        self._ensure_namespaces()
+        workspace = StagingWorkspace(uuid4().hex)
+        self.workspace_path(workspace).mkdir(parents=True, exist_ok=False)
+        return workspace
+
+    def _workspace_root(self) -> Path:
+        candidate = self.root / "staging" / "jobs"
+        if candidate.is_symlink():
+            raise ValueError("workspace root symlinks are not allowed")
+        root = candidate.resolve()
+        if self.root not in root.parents:
+            raise ValueError("workspace root escaped storage")
+        return root
+
+    def workspace_path(self, workspace: StagingWorkspace) -> Path:
+        root = self._workspace_root()
+        candidate = (root / workspace.value).resolve()
+        if root not in candidate.parents:
+            raise ValueError("workspace escaped staging storage")
+        return candidate
+
+    def workspace_files(
+        self,
+        workspace: StagingWorkspace,
+        *,
+        max_files: int = 32,
+        max_total_bytes: int | None = None,
+    ) -> list[Path]:
+        root = self.workspace_path(workspace)
+        files: list[Path] = []
+        total = 0
+        if not root.exists():
+            return files
+        for path in root.rglob("*"):
+            if path.is_symlink():
+                raise ValueError("workspace symlinks are not allowed")
+            if not path.is_file():
+                continue
+            resolved = path.resolve()
+            if root not in resolved.parents:
+                raise ValueError("workspace file escaped staging storage")
+            files.append(resolved)
+            if len(files) > max_files:
+                raise ValueError("workspace contains too many files")
+            total += resolved.stat().st_size
+            if max_total_bytes is not None and total > max_total_bytes:
+                raise ValueError("workspace exceeds its byte limit")
+        return sorted(files)
+
+    def remove_workspace(self, workspace: StagingWorkspace) -> None:
+        path = self.workspace_path(workspace)
+        if path.exists():
+            shutil.rmtree(path)
+
+    def purge_workspaces_older_than(self, cutoff: datetime) -> int:
+        root = self._workspace_root()
+        if not root.exists():
+            return 0
+        removed = 0
+        for candidate in root.iterdir():
+            if not _WORKSPACE_ID.fullmatch(candidate.name):
+                continue
+            modified = datetime.fromtimestamp(candidate.lstat().st_mtime, UTC)
+            if modified >= cutoff:
+                continue
+            if candidate.is_symlink():
+                candidate.unlink()
+            elif candidate.is_dir():
+                self.remove_workspace(StagingWorkspace(candidate.name))
+            else:
+                candidate.unlink()
+            removed += 1
+        return removed
 
     def open_for_write(self, key: StorageKey) -> BinaryIO:
         if key.namespace != "staging":

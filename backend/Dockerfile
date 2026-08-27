@@ -2,8 +2,11 @@
 
 ARG PYTHON_VERSION=3.13
 ARG UV_VERSION=0.12.5
+ARG NODE_VERSION=24.19.0
 
 FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+
+FROM node:${NODE_VERSION}-bookworm-slim AS node-runtime
 
 FROM python:${PYTHON_VERSION}-slim AS builder
 
@@ -22,12 +25,16 @@ RUN uv sync --frozen --no-dev --no-editable
 
 FROM python:${PYTHON_VERSION}-slim AS runtime
 
+ARG NODE_VERSION
+
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ffmpeg \
+    && apt-get install --yes --no-install-recommends ffmpeg libatomic1 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 10001 arion \
     && useradd --system --uid 10001 --gid arion --home-dir /nonexistent arion
@@ -38,6 +45,10 @@ COPY --from=builder --chown=10001:10001 /app/.venv /app/.venv
 COPY --from=builder --chown=10001:10001 /app/src /app/src
 COPY --chown=10001:10001 alembic.ini ./alembic.ini
 COPY --chown=10001:10001 migrations ./migrations
+
+RUN yt-dlp --version \
+    && test "$(node --version)" = "v${NODE_VERSION}" \
+    && ffmpeg -version
 
 RUN mkdir --parents /var/lib/arion/media \
     && chown --recursive 10001:10001 /var/lib/arion/media

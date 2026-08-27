@@ -53,3 +53,36 @@ class AudioNotFoundError(ArionError):
     status_code = 404
     code = "audio_not_found"
     public_message = "Track audio not found."
+
+
+class YouTubeAcquisitionDisabledError(ArionError):
+    status_code = 503
+    code = "youtube_acquisition_disabled"
+    public_message = "YouTube acquisition is disabled on this server."
+
+
+class YouTubeProviderUnavailableError(ArionError):
+    status_code = 502
+    code = "youtube_provider_unavailable"
+    public_message = "YouTube discovery is temporarily unavailable."
+
+
+class InvalidCandidateError(ArionError):
+    status_code = 409
+    code = "invalid_candidate"
+    public_message = "The selected candidate is invalid or has expired."
+
+
+class AcquisitionJobNotFoundError(ArionError):
+    status_code = 404
+    code = "acquisition_job_not_found"
+    public_message = "Acquisition job not found."
+
+
+class AcquisitionFailure(Exception):
+    """Internal worker failure with a safe public classification."""
+
+    def __init__(self, code: str, public_message: str) -> None:
+        super().__init__(public_message)
+        self.code = code[:64]
+        self.public_message = public_message[:512]

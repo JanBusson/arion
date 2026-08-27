@@ -26,7 +26,7 @@ def main() -> int:
 
     config = json.load(sys.stdin)
     services = config["services"]
-    assert set(("db", "migrate", "api", "web")).issubset(services)
+    assert set(("db", "migrate", "api", "worker", "web")).issubset(services)
 
     assert not services["db"].get("ports"), "PostgreSQL must not publish a host port"
 
@@ -43,7 +43,29 @@ def main() -> int:
     assert web.get("depends_on", {}).get("api", {}).get("condition") == "service_healthy"
     assert web.get("healthcheck", {}).get("test"), "web health check is missing"
 
-    print("Compose bindings, dependency, health, restart, and database isolation checks passed")
+    worker = services["worker"]
+    assert worker.get("command") == ["python", "-m", "arion_api.worker"]
+    assert worker.get("user") == "10001:10001"
+    assert worker.get("read_only") is True
+    assert worker.get("restart") == "unless-stopped"
+    assert worker.get("healthcheck", {}).get("disable") is True
+    assert worker.get("depends_on", {}).get("migrate", {}).get("condition") == (
+        "service_completed_successfully"
+    )
+    assert worker.get("security_opt") == ["no-new-privileges:true"]
+    assert worker.get("environment", {}).get("ARION_YOUTUBE_ACQUISITION_ENABLED") == (
+        "false"
+    )
+    api_volumes = {volume.get("target") for volume in services["api"].get("volumes", [])}
+    worker_volumes = {volume.get("target") for volume in worker.get("volumes", [])}
+    assert "/var/lib/arion/media" in api_volumes & worker_volumes
+    assert float(worker.get("cpus", 0)) == 1.0
+    assert int(worker.get("mem_limit", 0)) == 805306368
+
+    print(
+        "Compose bindings, worker isolation, dependency, health, restart, "
+        "and database isolation checks passed"
+    )
     return 0
 
 

@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:arion_client/configuration/api_base_url.dart';
 import 'package:arion_client/configuration/settings_store.dart';
 import 'package:arion_client/library/catalog_api.dart';
+import 'package:arion_client/library/acquisition.dart';
+import 'package:arion_client/library/acquisition_job_store.dart';
 import 'package:arion_client/library/track.dart';
 import 'package:arion_client/playback/audio_player_port.dart';
 
@@ -32,20 +34,39 @@ final class FakeSettingsStore implements SettingsStore {
 
 typedef FetchHandler =
     Future<TrackPage> Function(int limit, int offset, String? query);
+typedef DiscoveryHandler =
+    Future<List<YouTubeCandidate>> Function(String query);
+typedef CreateJobHandler = Future<AcquisitionJob> Function(String candidateId);
+typedef FetchJobHandler = Future<AcquisitionJob> Function(String jobId);
 
 final class FakeCatalogApi implements CatalogApi {
-  FakeCatalogApi({FetchHandler? handler})
-    : handler =
-          handler ??
-          ((limit, offset, query) async => TrackPage(
-            items: const [],
-            total: 0,
-            limit: limit,
-            offset: offset,
-          ));
+  FakeCatalogApi({
+    FetchHandler? handler,
+    DiscoveryHandler? discoveryHandler,
+    CreateJobHandler? createJobHandler,
+    FetchJobHandler? fetchJobHandler,
+  }) : handler =
+           handler ??
+           ((limit, offset, query) async => TrackPage(
+             items: const [],
+             total: 0,
+             limit: limit,
+             offset: offset,
+           )),
+       discoveryHandler = discoveryHandler ?? ((_) async => const []),
+       createJobHandler =
+           createJobHandler ?? ((_) async => sampleAcquisitionJob()),
+       fetchJobHandler =
+           fetchJobHandler ?? ((_) async => sampleAcquisitionJob());
 
   FetchHandler handler;
+  DiscoveryHandler discoveryHandler;
+  CreateJobHandler createJobHandler;
+  FetchJobHandler fetchJobHandler;
   final List<({int limit, int offset, String? query})> calls = [];
+  final List<String> discoveryCalls = [];
+  final List<String> createdCandidates = [];
+  final List<String> fetchedJobs = [];
   bool closed = false;
 
   @override
@@ -59,6 +80,27 @@ final class FakeCatalogApi implements CatalogApi {
   }
 
   @override
+  Future<Track> fetchTrack(String trackId) async => sampleTrack(id: trackId);
+
+  @override
+  Future<List<YouTubeCandidate>> discoverYouTube(String query) {
+    discoveryCalls.add(query);
+    return discoveryHandler(query);
+  }
+
+  @override
+  Future<AcquisitionJob> createAcquisitionJob(String candidateId) {
+    createdCandidates.add(candidateId);
+    return createJobHandler(candidateId);
+  }
+
+  @override
+  Future<AcquisitionJob> fetchAcquisitionJob(String jobId) {
+    fetchedJobs.add(jobId);
+    return fetchJobHandler(jobId);
+  }
+
+  @override
   Uri audioUri(String trackId) => Uri.parse('http://arion.test/audio/$trackId');
 
   @override
@@ -66,6 +108,19 @@ final class FakeCatalogApi implements CatalogApi {
 
   @override
   void close() => closed = true;
+}
+
+final class FakeAcquisitionJobStore implements AcquisitionJobStore {
+  String? value;
+
+  @override
+  Future<String?> readActiveJobId() async => value;
+
+  @override
+  Future<void> writeActiveJobId(String jobId) async => value = jobId;
+
+  @override
+  Future<void> clearActiveJobId() async => value = null;
 }
 
 final class FakeAudioPlayer implements AudioPlayerPort {
@@ -163,3 +218,37 @@ Track sampleTrack({
 );
 
 ApiBaseUrl sampleBaseUrl() => ApiBaseUrl.parse('http://arion.test:8000');
+
+YouTubeCandidate sampleCandidate({
+  String candidateId = 'signed-candidate-token',
+  String videoId = 'abcdefghijk',
+  String title = 'Candidate song',
+}) => YouTubeCandidate(
+  candidateId: candidateId,
+  videoId: videoId,
+  title: title,
+  channel: 'Candidate artist',
+  durationSeconds: 125,
+  thumbnailUrl: Uri.parse('https://i.ytimg.com/vi/$videoId/default.jpg'),
+  pageUrl: Uri.parse('https://www.youtube.com/watch?v=$videoId'),
+);
+
+AcquisitionJob sampleAcquisitionJob({
+  String id = '10000000-0000-0000-0000-000000000001',
+  String state = 'queued',
+  String phase = 'queued',
+  int progressPercent = 0,
+  String? trackId,
+  String? failureCode,
+  String? failureMessage,
+}) => AcquisitionJob(
+  id: id,
+  state: state,
+  phase: phase,
+  progressPercent: progressPercent,
+  attempts: 0,
+  candidate: sampleCandidate(),
+  trackId: trackId,
+  failureCode: failureCode,
+  failureMessage: failureMessage,
+);

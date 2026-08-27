@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../library/acquisition.dart';
 import '../library/catalog_api.dart';
 import '../library/library_controller.dart';
 import '../library/track.dart';
@@ -47,6 +49,60 @@ final class _LibraryScreenState extends State<LibraryScreen> {
   Future<void> _clearSearch() async {
     _search.clear();
     await widget.library.clearSearch();
+  }
+
+  Future<void> _confirmAcquisition(YouTubeCandidate candidate) async {
+    var acknowledged = false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Experimental YouTube acquisition'),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${candidate.title} — ${candidate.channel}'),
+                const SizedBox(height: 12),
+                const Text(
+                  'YouTube may restrict downloading. This confirmation does '
+                  'not grant rights or override provider terms.',
+                ),
+                const SizedBox(height: 8),
+                CheckboxListTile(
+                  key: const Key('acquisition-authorization-checkbox'),
+                  contentPadding: EdgeInsets.zero,
+                  value: acknowledged,
+                  onChanged: (value) =>
+                      setDialogState(() => acknowledged = value ?? false),
+                  title: const Text(
+                    'I confirm that I am authorized to acquire this content.',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              key: const Key('confirm-acquisition-button'),
+              onPressed: acknowledged
+                  ? () => Navigator.of(dialogContext).pop(true)
+                  : null,
+              child: const Text('Acquire'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await widget.library.startAcquisition(candidate);
+    }
   }
 
   @override
@@ -98,6 +154,8 @@ final class _LibraryScreenState extends State<LibraryScreen> {
                     track,
                     widget.api.audioUri(track.id),
                   ),
+                  onDiscoverYouTube: widget.library.discoverYouTube,
+                  onSelectCandidate: _confirmAcquisition,
                 ),
               ),
             ),
@@ -122,12 +180,16 @@ final class _LibraryBody extends StatelessWidget {
     required this.scrollController,
     required this.coverUri,
     required this.onPlay,
+    required this.onDiscoverYouTube,
+    required this.onSelectCandidate,
   });
 
   final LibraryController controller;
   final ScrollController scrollController;
   final Uri Function(String trackId) coverUri;
   final ValueChanged<Track> onPlay;
+  final VoidCallback onDiscoverYouTube;
+  final ValueChanged<YouTubeCandidate> onSelectCandidate;
 
   @override
   Widget build(BuildContext context) {
@@ -142,61 +204,205 @@ final class _LibraryBody extends StatelessWidget {
         onAction: controller.retry,
       );
     }
+    final job = controller.activeJob;
+    if (job?.isActive == true && controller.items.isEmpty) {
+      return _AcquisitionStatus(job: job!, error: controller.acquisitionError);
+    }
     if (controller.isEmpty) {
+      if (controller.isDiscovering) {
+        return const Center(child: CircularProgressIndicator());
+      }
+      if (controller.candidates.isNotEmpty) {
+        return _CandidateList(
+          candidates: controller.candidates,
+          onSelect: onSelectCandidate,
+        );
+      }
+      if (controller.acquisitionError != null) {
+        return _MessageState(
+          icon: Icons.download_for_offline_outlined,
+          message: controller.acquisitionError!,
+          actionLabel: controller.canSearchYouTube
+              ? 'Retry YouTube search'
+              : null,
+          onAction: controller.canSearchYouTube ? onDiscoverYouTube : null,
+        );
+      }
       return _MessageState(
         icon: Icons.library_music_outlined,
         message: controller.query.isEmpty
             ? 'Your library is empty.'
             : 'No tracks match “${controller.query}”.',
+        actionLabel: controller.canSearchYouTube ? 'Search YouTube' : null,
+        onAction: controller.canSearchYouTube ? onDiscoverYouTube : null,
       );
     }
 
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 960),
-        child: ListView.builder(
-          key: const Key('track-list'),
-          controller: scrollController,
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-          itemCount: controller.items.length + 1,
-          itemBuilder: (context, index) {
-            if (index == controller.items.length) {
-              if (controller.isLoadingMore) {
-                return const Padding(
-                  padding: EdgeInsets.all(20),
-                  child: Center(child: CircularProgressIndicator()),
-                );
-              }
-              if (controller.error != null) {
-                return Center(
-                  child: TextButton.icon(
-                    onPressed: controller.loadMore,
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Retry loading more'),
-                  ),
-                );
-              }
-              if (controller.hasMore) {
-                return Center(
-                  child: TextButton(
-                    key: const Key('load-more-button'),
-                    onPressed: controller.loadMore,
-                    child: const Text('Load more'),
-                  ),
-                );
-              }
-              return const SizedBox(height: 8);
-            }
-            final track = controller.items[index];
-            return _TrackTile(
-              track: track,
-              coverUri: coverUri,
-              onPlay: () => onPlay(track),
-            );
-          },
+        child: Column(
+          children: [
+            if (job != null)
+              _AcquisitionStatus(
+                job: job,
+                error: controller.acquisitionError,
+                compact: true,
+              ),
+            Expanded(
+              child: ListView.builder(
+                key: const Key('track-list'),
+                controller: scrollController,
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                itemCount: controller.items.length + 1,
+                itemBuilder: (context, index) {
+                  if (index == controller.items.length) {
+                    if (controller.isLoadingMore) {
+                      return const Padding(
+                        padding: EdgeInsets.all(20),
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+                    if (controller.error != null) {
+                      return Center(
+                        child: TextButton.icon(
+                          onPressed: controller.loadMore,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Retry loading more'),
+                        ),
+                      );
+                    }
+                    if (controller.hasMore) {
+                      return Center(
+                        child: TextButton(
+                          key: const Key('load-more-button'),
+                          onPressed: controller.loadMore,
+                          child: const Text('Load more'),
+                        ),
+                      );
+                    }
+                    return const SizedBox(height: 8);
+                  }
+                  final track = controller.items[index];
+                  return _TrackTile(
+                    track: track,
+                    coverUri: coverUri,
+                    onPlay: () => onPlay(track),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );
+  }
+}
+
+final class _CandidateList extends StatelessWidget {
+  const _CandidateList({required this.candidates, required this.onSelect});
+
+  final List<YouTubeCandidate> candidates;
+  final ValueChanged<YouTubeCandidate> onSelect;
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 960),
+      child: ListView.builder(
+        key: const Key('youtube-candidate-list'),
+        padding: const EdgeInsets.all(12),
+        itemCount: candidates.length,
+        itemBuilder: (context, index) {
+          final candidate = candidates[index];
+          return Card(
+            child: ListTile(
+              leading: SizedBox.square(
+                dimension: 72,
+                child: candidate.thumbnailUrl == null
+                    ? const _CoverPlaceholder()
+                    : Image.network(
+                        candidate.thumbnailUrl.toString(),
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => const _CoverPlaceholder(),
+                      ),
+              ),
+              title: Text(candidate.title),
+              subtitle: Text(
+                '${candidate.channel} • ${candidate.formattedDuration}',
+              ),
+              trailing: Wrap(
+                spacing: 4,
+                children: [
+                  IconButton(
+                    tooltip: 'Open on YouTube',
+                    onPressed: () => launchUrl(
+                      candidate.pageUrl,
+                      mode: LaunchMode.externalApplication,
+                    ),
+                    icon: const Icon(Icons.open_in_new),
+                  ),
+                  FilledButton(
+                    key: Key('select-candidate-${candidate.videoId}'),
+                    onPressed: () => onSelect(candidate),
+                    child: const Text('Select'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    ),
+  );
+}
+
+final class _AcquisitionStatus extends StatelessWidget {
+  const _AcquisitionStatus({
+    required this.job,
+    required this.error,
+    this.compact = false,
+  });
+
+  final AcquisitionJob job;
+  final String? error;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final content = Card(
+      key: const Key('acquisition-status'),
+      margin: const EdgeInsets.all(12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              job.candidate.title,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              job.isCompleted ? 'Ready in your library' : error ?? job.phase,
+            ),
+            if (job.isActive) ...[
+              const SizedBox(height: 10),
+              LinearProgressIndicator(value: job.progressPercent / 100),
+            ],
+          ],
+        ),
+      ),
+    );
+    return compact
+        ? content
+        : Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 640),
+              child: content,
+            ),
+          );
   }
 }
 

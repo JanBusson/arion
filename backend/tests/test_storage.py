@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from arion_api.storage import LocalMediaStorage, StorageKey, StoredAudio
+from arion_api.storage import (
+    LocalMediaStorage,
+    StagingWorkspace,
+    StorageKey,
+    StoredAudio,
+)
 
 
 @pytest.mark.parametrize(
@@ -160,3 +165,61 @@ def test_storage_readiness_probe_cleans_up(tmp_path: Path) -> None:
 
     assert storage.probe_ready() is True
     assert list((tmp_path / "staging").iterdir()) == []
+
+
+def test_workspace_is_generated_bounded_and_idempotently_removed(tmp_path: Path) -> None:
+    storage = LocalMediaStorage(tmp_path)
+    workspace = storage.create_workspace()
+    root = storage.workspace_path(workspace)
+    (root / "audio.m4a").write_bytes(b"audio")
+
+    assert storage.workspace_files(workspace, max_total_bytes=5) == [
+        (root / "audio.m4a").resolve()
+    ]
+    with pytest.raises(ValueError, match="byte limit"):
+        storage.workspace_files(workspace, max_total_bytes=4)
+
+    storage.remove_workspace(workspace)
+    storage.remove_workspace(workspace)
+    assert not root.exists()
+
+
+def test_workspace_retention_removes_only_old_generated_workspaces(
+    tmp_path: Path,
+) -> None:
+    storage = LocalMediaStorage(tmp_path)
+    old_workspace = storage.create_workspace()
+    recent_workspace = storage.create_workspace()
+    unrelated = storage._workspace_root() / "do-not-touch"
+    unrelated.mkdir()
+    old = datetime.now(UTC) - timedelta(days=8)
+    os.utime(storage.workspace_path(old_workspace), (old.timestamp(), old.timestamp()))
+
+    removed = storage.purge_workspaces_older_than(
+        datetime.now(UTC) - timedelta(days=7)
+    )
+
+    assert removed == 1
+    assert not storage.workspace_path(old_workspace).exists()
+    assert storage.workspace_path(recent_workspace).exists()
+    assert unrelated.exists()
+
+
+def test_workspace_root_symlink_is_rejected(tmp_path: Path) -> None:
+    external = tmp_path / "external"
+    external.mkdir()
+    jobs = tmp_path / "staging" / "jobs"
+    jobs.parent.mkdir(parents=True)
+    try:
+        jobs.symlink_to(external, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+
+    with pytest.raises(ValueError, match="symlink"):
+        LocalMediaStorage(tmp_path).create_workspace()
+
+
+@pytest.mark.parametrize("value", ["../escape", "A" * 32, "abc", "0" * 31])
+def test_workspace_rejects_unsafe_identifiers(value: str) -> None:
+    with pytest.raises(ValueError):
+        StagingWorkspace(value)

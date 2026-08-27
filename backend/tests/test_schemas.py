@@ -1,7 +1,10 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from arion_api.schemas import TrackResponse
+import pytest
+from pydantic import ValidationError
+
+from arion_api.schemas import AcquisitionJobCreate, TrackResponse
 
 
 def test_track_response_is_an_allow_list() -> None:
@@ -29,3 +32,19 @@ def test_track_response_is_an_allow_list() -> None:
     assert "sha256" not in payload
     assert "audio_storage_key" not in payload
     assert "cover_storage_key" not in payload
+
+
+def test_acquisition_job_create_requires_acknowledgement_and_forbids_extras() -> None:
+    with pytest.raises(ValidationError, match="acknowledgement"):
+        AcquisitionJobCreate(
+            candidate_id="x" * 32,
+            authorization_acknowledged=False,
+        )
+    with pytest.raises(ValidationError, match="extra"):
+        AcquisitionJobCreate.model_validate(
+            {
+                "candidate_id": "x" * 32,
+                "authorization_acknowledged": True,
+                "command": "--cookies secret",
+            }
+        )

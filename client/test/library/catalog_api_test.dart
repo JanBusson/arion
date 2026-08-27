@@ -23,6 +23,32 @@ void main() {
     'updated_at': '2026-08-23T00:00:00Z',
   };
 
+  Map<String, Object?> candidateJson({String videoId = 'abcdefghijk'}) => {
+    'candidate_id': 'signed-candidate-token',
+    'video_id': videoId,
+    'title': 'Candidate song',
+    'channel': 'Candidate artist',
+    'duration_seconds': 125,
+    'thumbnail_url': 'https://i.ytimg.com/vi/$videoId/default.jpg',
+    'page_url': 'https://www.youtube.com/watch?v=$videoId',
+  };
+
+  Map<String, Object?> jobJson({String state = 'queued'}) => {
+    'id': '10000000-0000-0000-0000-000000000001',
+    'state': state,
+    'phase': state,
+    'progress_percent': state == 'completed' ? 100 : 0,
+    'attempts': 0,
+    'candidate': {...candidateJson()}..remove('candidate_id'),
+    'track_id': state == 'completed'
+        ? '00000000-0000-0000-0000-000000000001'
+        : null,
+    'failure_code': null,
+    'failure_message': null,
+    'created_at': '2026-08-24T00:00:00Z',
+    'updated_at': '2026-08-24T00:00:00Z',
+  };
+
   test('encodes query and pagination and parses success', () async {
     late Uri requested;
     final api = ArionApi(
@@ -105,6 +131,144 @@ void main() {
           contains('too long'),
         ),
       ),
+    );
+  });
+
+  test('discovers candidates using a trimmed encoded query', () async {
+    late Uri requested;
+    final api = ArionApi(
+      baseUrl: sampleBaseUrl(),
+      client: MockClient((request) async {
+        requested = request.url;
+        return http.Response(
+          jsonEncode({
+            'items': [candidateJson()],
+          }),
+          200,
+        );
+      }),
+    );
+
+    final candidates = await api.discoverYouTube('  AC/DC live  ');
+
+    expect(requested.path, '/api/v1/acquisition/youtube/candidates');
+    expect(requested.queryParameters, {'q': 'AC/DC live'});
+    expect(candidates.single.title, 'Candidate song');
+    expect(candidates.single.pageUrl.scheme, 'https');
+  });
+
+  test(
+    'creates a job with only candidate and acknowledgement fields',
+    () async {
+      late http.Request sent;
+      final api = ArionApi(
+        baseUrl: sampleBaseUrl(),
+        client: MockClient((request) async {
+          sent = request;
+          return http.Response(jsonEncode(jobJson()), 202);
+        }),
+      );
+
+      final job = await api.createAcquisitionJob('signed-candidate-token');
+
+      expect(sent.url.path, '/api/v1/acquisition/jobs');
+      expect(sent.method, 'POST');
+      expect(sent.headers['content-type'], 'application/json');
+      expect(jsonDecode(sent.body), {
+        'candidate_id': 'signed-candidate-token',
+        'authorization_acknowledged': true,
+      });
+      expect(job.state, 'queued');
+    },
+  );
+
+  test('polls a job and fetches its resulting track', () async {
+    final paths = <String>[];
+    final api = ArionApi(
+      baseUrl: sampleBaseUrl(),
+      client: MockClient((request) async {
+        paths.add(request.url.path);
+        if (request.url.path.startsWith('/api/v1/acquisition/jobs/')) {
+          return http.Response(jsonEncode(jobJson(state: 'completed')), 200);
+        }
+        return http.Response(jsonEncode(trackJson()), 200);
+      }),
+    );
+
+    final job = await api.fetchAcquisitionJob('job-id');
+    final track = await api.fetchTrack(job.trackId!);
+
+    expect(job.isCompleted, isTrue);
+    expect(track.title, 'Title');
+    expect(paths, [
+      '/api/v1/acquisition/jobs/job-id',
+      '/api/v1/tracks/00000000-0000-0000-0000-000000000001',
+    ]);
+  });
+
+  test('preserves stable sanitized acquisition errors', () async {
+    final api = ArionApi(
+      baseUrl: sampleBaseUrl(),
+      client: MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'detail': {
+              'code': 'youtube_acquisition_disabled',
+              'message': 'YouTube acquisition is disabled.',
+            },
+          }),
+          503,
+        ),
+      ),
+    );
+
+    await expectLater(
+      api.discoverYouTube('missing'),
+      throwsA(
+        isA<CatalogException>()
+            .having(
+              (error) => error.code,
+              'code',
+              'youtube_acquisition_disabled',
+            )
+            .having(
+              (error) => error.message,
+              'message',
+              'YouTube acquisition is disabled.',
+            ),
+      ),
+    );
+  });
+
+  test('rejects unsafe candidate URLs and malformed job data', () async {
+    var call = 0;
+    final api = ArionApi(
+      baseUrl: sampleBaseUrl(),
+      client: MockClient((_) async {
+        call += 1;
+        return call == 1
+            ? http.Response(
+                jsonEncode({
+                  'items': [
+                    {...candidateJson(), 'page_url': 'javascript:alert(1)'},
+                  ],
+                }),
+                200,
+              )
+            : http.Response(
+                jsonEncode({...jobJson(), 'attempts': 'zero'}),
+                200,
+              );
+      }),
+    );
+
+    await expectLater(
+      api.discoverYouTube('missing'),
+      throwsA(isA<CatalogException>()),
+    );
+    await expectLater(
+      api.fetchAcquisitionJob('job-id'),
+      throwsA(isA<CatalogException>()),
     );
   });
 }

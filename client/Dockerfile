@@ -38,7 +38,7 @@ WORKDIR /src/client
 COPY .flutter-version /tmp/arion-flutter-version
 COPY client/pubspec.yaml client/pubspec.lock ./
 
-RUN test "$(cat /tmp/arion-flutter-version)" = "${FLUTTER_VERSION}" \
+RUN test "$(tr -d '\r\n' < /tmp/arion-flutter-version)" = "${FLUTTER_VERSION}" \
     && flutter pub get --enforce-lockfile
 
 COPY client/.metadata ./

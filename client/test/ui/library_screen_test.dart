@@ -123,6 +123,141 @@ void main() {
     expect(find.text('Second'), findsOneWidget);
   });
 
+  testWidgets('reviews multiple candidates without preselecting one', (
+    tester,
+  ) async {
+    final candidates = [
+      sampleCandidate(title: 'First candidate'),
+      sampleCandidate(
+        candidateId: 'another-signed-token',
+        videoId: 'lmnopqrstuv',
+        title: 'Second candidate',
+      ),
+    ];
+    final api = FakeCatalogApi(discoveryHandler: (_) async => candidates);
+    await pumpLibrary(tester, api: api, player: FakeAudioPlayer());
+    await tester.enterText(
+      find.byKey(const Key('library-search-field')),
+      'missing',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Search YouTube'), findsOneWidget);
+    expect(api.discoveryCalls, isEmpty);
+    await tester.tap(find.text('Search YouTube'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('First candidate'), findsOneWidget);
+    expect(find.text('Second candidate'), findsOneWidget);
+    expect(find.textContaining('correct', findRichText: true), findsNothing);
+    expect(api.createdCandidates, isEmpty);
+  });
+
+  testWidgets('requires selection and authorization before creating a job', (
+    tester,
+  ) async {
+    final player = FakeAudioPlayer();
+    final api = FakeCatalogApi(
+      discoveryHandler: (_) async => [sampleCandidate()],
+      createJobHandler: (_) async => sampleAcquisitionJob(
+        state: 'completed',
+        phase: 'completed',
+        progressPercent: 100,
+        trackId: 'downloaded-track',
+      ),
+    );
+    await pumpLibrary(tester, api: api, player: player);
+    await tester.enterText(
+      find.byKey(const Key('library-search-field')),
+      'missing',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Search YouTube'));
+    await tester.pumpAndSettle();
+
+    expect(api.createdCandidates, isEmpty);
+    await tester.tap(find.byKey(const Key('select-candidate-abcdefghijk')));
+    await tester.pumpAndSettle();
+    final acquire = tester.widget<FilledButton>(
+      find.byKey(const Key('confirm-acquisition-button')),
+    );
+    expect(acquire.onPressed, isNull);
+    expect(api.createdCandidates, isEmpty);
+
+    await tester.tap(
+      find.byKey(const Key('acquisition-authorization-checkbox')),
+    );
+    await tester.pump();
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const Key('confirm-acquisition-button')),
+          )
+          .onPressed,
+      isNotNull,
+    );
+    await tester.tap(find.byKey(const Key('confirm-acquisition-button')));
+    await tester.pumpAndSettle();
+
+    expect(api.createdCandidates, ['signed-candidate-token']);
+    expect(find.text('First track'), findsOneWidget);
+    expect(player.playCalls, 0);
+  });
+
+  testWidgets('shows active progress and terminal failure safely', (
+    tester,
+  ) async {
+    final api = FakeCatalogApi(
+      discoveryHandler: (_) async => [sampleCandidate()],
+      createJobHandler: (_) async => sampleAcquisitionJob(),
+      fetchJobHandler: (_) async => sampleAcquisitionJob(
+        state: 'failed',
+        phase: 'failed',
+        failureMessage: 'This item could not be acquired.',
+      ),
+    );
+    final controller = LibraryController(
+      api,
+      jobPollInterval: const Duration(milliseconds: 1),
+    );
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LibraryScreen(
+          library: controller,
+          playback: PlaybackController(FakeAudioPlayer()),
+          api: api,
+          onOpenSettings: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('library-search-field')),
+      'missing',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Search YouTube'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('select-candidate-abcdefghijk')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const Key('acquisition-authorization-checkbox')),
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('confirm-acquisition-button')));
+    await tester.pump(const Duration(milliseconds: 2));
+    await tester.pumpAndSettle();
+
+    expect(find.text('This item could not be acquired.'), findsOneWidget);
+  });
+
   testWidgets(
     'player UI supports selection, seeking, replacement and recovery',
     (tester) async {

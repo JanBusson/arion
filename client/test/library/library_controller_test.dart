@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:arion_client/library/catalog_api.dart';
+import 'package:arion_client/library/acquisition.dart';
 import 'package:arion_client/library/library_controller.dart';
 import 'package:arion_client/library/track.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -126,4 +127,167 @@ void main() {
     expect(controller.query, 'new');
     expect(controller.items.single.title, 'New');
   });
+
+  test('offers discovery only after an explicit empty local search', () async {
+    final api = FakeCatalogApi(
+      discoveryHandler: (_) async => [sampleCandidate()],
+    );
+    final controller = LibraryController(api);
+
+    expect(controller.canSearchYouTube, isFalse);
+    await controller.submitSearch('missing song');
+    expect(controller.canSearchYouTube, isTrue);
+    expect(api.discoveryCalls, isEmpty);
+
+    await controller.discoverYouTube();
+    expect(api.discoveryCalls, ['missing song']);
+    expect(controller.candidates.single.videoId, 'abcdefghijk');
+  });
+
+  test('does not offer discovery when the local search has results', () async {
+    final api = FakeCatalogApi(
+      handler: (limit, offset, query) async => TrackPage(
+        items: [sampleTrack()],
+        total: 1,
+        limit: limit,
+        offset: offset,
+      ),
+    );
+    final controller = LibraryController(api);
+
+    await controller.submitSearch('present song');
+    await controller.discoverYouTube();
+
+    expect(controller.canSearchYouTube, isFalse);
+    expect(api.discoveryCalls, isEmpty);
+  });
+
+  test('ignores discovery results after a newer local search', () async {
+    final discovery = Completer<List<YouTubeCandidate>>();
+    final api = FakeCatalogApi(discoveryHandler: (_) => discovery.future);
+    final controller = LibraryController(api);
+    await controller.submitSearch('old missing song');
+
+    final oldDiscovery = controller.discoverYouTube();
+    await controller.submitSearch('new missing song');
+    discovery.complete([sampleCandidate()]);
+    await oldDiscovery;
+
+    expect(controller.query, 'new missing song');
+    expect(controller.candidates, isEmpty);
+  });
+
+  test('polls one job, remembers it, and reveals without autoplay', () async {
+    final store = FakeAcquisitionJobStore();
+    final responses = <AcquisitionJob>[
+      sampleAcquisitionJob(state: 'downloading', phase: 'downloading'),
+      sampleAcquisitionJob(
+        state: 'completed',
+        phase: 'completed',
+        progressPercent: 100,
+        trackId: 'downloaded-track',
+      ),
+    ];
+    final api = FakeCatalogApi(
+      discoveryHandler: (_) async => [sampleCandidate()],
+      createJobHandler: (_) async => sampleAcquisitionJob(),
+      fetchJobHandler: (_) async => responses.removeAt(0),
+    );
+    final controller = LibraryController(
+      api,
+      jobStore: store,
+      jobPollInterval: Duration.zero,
+    );
+    await controller.submitSearch('missing');
+    await controller.discoverYouTube();
+
+    await controller.startAcquisition(controller.candidates.single);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    expect(api.createdCandidates, ['signed-candidate-token']);
+    expect(api.fetchedJobs, hasLength(2));
+    expect(store.value, isNull);
+    expect(controller.activeJob?.isCompleted, isTrue);
+    expect(controller.items.single.id, 'downloaded-track');
+    expect(controller.query, isEmpty);
+  });
+
+  test('resumes a remembered job and reports terminal failure', () async {
+    final store = FakeAcquisitionJobStore()..value = 'remembered-job';
+    final api = FakeCatalogApi(
+      fetchJobHandler: (_) async => sampleAcquisitionJob(
+        state: 'failed',
+        phase: 'failed',
+        failureCode: 'provider_unavailable',
+        failureMessage: 'The provider is temporarily unavailable.',
+      ),
+    );
+    final controller = LibraryController(api, jobStore: store);
+
+    await controller.loadInitial();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(api.fetchedJobs, ['remembered-job']);
+    expect(store.value, isNull);
+    expect(controller.activeJob?.isFailed, isTrue);
+    expect(
+      controller.acquisitionError,
+      'The provider is temporarily unavailable.',
+    );
+  });
+
+  test('prevents a duplicate submission while a job is active', () async {
+    final api = FakeCatalogApi(
+      discoveryHandler: (_) async => [sampleCandidate()],
+      createJobHandler: (_) async => sampleAcquisitionJob(),
+      fetchJobHandler: (_) => Completer<AcquisitionJob>().future,
+    );
+    final controller = LibraryController(
+      api,
+      jobPollInterval: const Duration(days: 1),
+    );
+    await controller.submitSearch('missing');
+    await controller.discoverYouTube();
+    final candidate = controller.candidates.single;
+
+    await controller.startAcquisition(candidate);
+    await controller.startAcquisition(candidate);
+
+    expect(api.createdCandidates, hasLength(1));
+    controller.dispose();
+  });
+
+  test(
+    'keeps polling after a reconnectable error and clears it on success',
+    () async {
+      var polls = 0;
+      final api = FakeCatalogApi(
+        discoveryHandler: (_) async => [sampleCandidate()],
+        createJobHandler: (_) async => sampleAcquisitionJob(),
+        fetchJobHandler: (_) async {
+          polls += 1;
+          if (polls == 1) {
+            throw const CatalogException('Connection interrupted.');
+          }
+          return sampleAcquisitionJob(
+            state: 'completed',
+            phase: 'completed',
+            progressPercent: 100,
+            trackId: 'reconnected-track',
+          );
+        },
+      );
+      final controller = LibraryController(api, jobPollInterval: Duration.zero);
+      await controller.submitSearch('missing');
+      await controller.discoverYouTube();
+
+      await controller.startAcquisition(controller.candidates.single);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(polls, 2);
+      expect(controller.activeJob?.isCompleted, isTrue);
+      expect(controller.acquisitionError, isNull);
+      expect(controller.items.single.id, 'reconnected-track');
+    },
+  );
 }

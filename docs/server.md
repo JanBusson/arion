@@ -69,6 +69,7 @@ The expected states are:
 - `db`: running and healthy
 - `migrate`: exited successfully with status 0
 - `api`: running and healthy
+- `worker`: running and idle while YouTube acquisition is disabled
 - `web`: running and healthy
 
 Check both operational endpoints from the server:
@@ -86,7 +87,7 @@ The first direct API command above must use `127.0.0.1`, because the API is inte
 ## Logs and readiness diagnosis
 
 ```bash
-docker compose logs --follow web api
+docker compose logs --follow web api worker
 docker compose logs migrate db
 docker compose ps --all
 ```
@@ -132,12 +133,12 @@ docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -
 Pause imports, then archive the media volume:
 
 ```bash
-docker compose stop api
+docker compose stop api worker
 docker run --rm \
   --volume arion_media_data:/data:ro \
   --volume "$PWD/backups:/backup" \
   alpine:3.22 tar -czf /backup/arion-media.tar.gz -C /data .
-docker compose start api
+docker compose start api worker
 curl --fail http://127.0.0.1:8000/ready
 ```
 
@@ -162,6 +163,7 @@ docker compose build
 docker compose up --detach db
 docker compose run --rm migrate
 docker compose up --detach api
+docker compose up --detach worker
 docker compose up --detach web
 docker compose ps --all
 curl --fail http://127.0.0.1:8000/health
@@ -170,6 +172,27 @@ curl --fail http://<server-lan-ip>:8080/
 ```
 
 The migration job is a gate: do not start the new API if it fails. Imports and catalog edits remain in the named volumes across container restarts.
+
+## Experimental acquisition operations
+
+Keep `ARION_YOUTUBE_ACQUISITION_ENABLED=false` unless you are deliberately testing owner-authorized media. Before enabling it, generate a unique signing secret of at least 32 random bytes, store it only in `.env`, review the duration/output/free-space/time/retry limits in `.env.example`, and recreate both processes:
+
+```bash
+docker compose up --detach api worker
+docker compose logs --follow api worker
+```
+
+The worker uses the API image, database, and media volume, runs unprivileged with one CPU and 768 MiB limits, and processes one job at a time. Search and approval happen in the client; logs use job IDs and stable failure codes. Never add cookies, arbitrary yt-dlp flags, user-supplied URLs, or public network exposure to work around a provider rejection.
+
+Inspect the toolchain without network access or import:
+
+```bash
+docker compose run --rm worker python -m arion_api.acquisition_smoke --inspection-only
+```
+
+Only after selecting a small public item you are authorized to acquire, add `--authorized-query "<title>" --acknowledge-authorized` to inspect discovery. That mode never enqueues or downloads. If a job fails, inspect `docker compose logs worker`, leave the worker running for bounded automatic retry, and verify the media volume has sufficient free space. Interrupted jobs are reclaimed after their lease expires and staging is cleaned after terminal processing.
+
+To stop acquisition, set the enable flag to `false` and recreate `api` and `worker`; existing catalog media is unaffected. Roll back with paired database/media backups and a schema-compatible image. Do not remove volumes, expose PostgreSQL, run yt-dlp self-update, or automatically downgrade the schema.
 
 ## Rollback
 

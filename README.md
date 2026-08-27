@@ -2,7 +2,7 @@
 
 Arion is a private, self-hosted music application and a learning project for backend, data, container, and deployment practices. The FastAPI backend imports audio, extracts metadata, stores media on the local server, exposes a searchable catalog, and streams original audio with HTTP byte-range seeking. One Flutter client connects from Android or is served through the private web gateway to search the library and play tracks.
 
-Playlists, authentication, public exposure, online metadata services, transcoding, background playback, and automated deployment are not implemented yet.
+Playlists, authentication, public exposure, online metadata services, background playback, and automated deployment are not implemented yet. Experimental owner-approved YouTube acquisition is available but disabled by default.
 
 ## Repository structure
 
@@ -21,7 +21,7 @@ Playlists, authentication, public exposure, online metadata services, transcodin
 |-- scripts/                       # Compose and black-box web gateway verification
 |-- .flutter-version               # Pinned Flutter stable SDK version
 |-- .env.example                   # Non-secret configuration example
-`-- compose.yaml                   # Web gateway, API, migration job, and PostgreSQL
+`-- compose.yaml                   # Web gateway, API, worker, migration job, and PostgreSQL
 ```
 
 ## Prerequisites
@@ -69,9 +69,15 @@ cp .env.example .env
 | `ARION_MEDIA_ROOT` | `/var/lib/arion/media` in Compose | Root containing staging, audio, and cover objects |
 | `ARION_MAX_UPLOAD_BYTES` | `524288000` | Maximum received bytes per import (500 MiB) |
 | `ARION_FFPROBE_EXECUTABLE` | `ffprobe` | Probe executable name or path |
+| `ARION_FFMPEG_EXECUTABLE` | `ffmpeg` | Compatibility remux/transcode executable |
 | `ARION_FFPROBE_TIMEOUT_SECONDS` | `30` | Maximum probe duration |
 | `ARION_RECONCILIATION_GRACE_SECONDS` | `3600` | Minimum age before crash artifacts can be removed |
 | `ARION_CORS_ORIGINS` | empty | Comma-separated exact browser origins allowed to call the API |
+| `ARION_YOUTUBE_ACQUISITION_ENABLED` | `false` | Explicit opt-in for experimental candidate discovery and acquisition |
+| `ARION_YOUTUBE_CANDIDATE_SECRET` | `replace-me` | Private candidate-signing key; at least 32 random bytes when enabled |
+| `ARION_YOUTUBE_MAX_DURATION_SECONDS` | `900` | Maximum eligible candidate duration |
+| `ARION_YOUTUBE_MAX_OUTPUT_BYTES` | `104857600` | Maximum generated audio bytes per job |
+| `ARION_YOUTUBE_MIN_FREE_BYTES` | `1073741824` | Required free space retained during acquisition |
 | `ARION_BIND_ADDRESS` | `127.0.0.1` | Host address where Compose publishes the API |
 | `ARION_PORT` | `8000` | Published host port |
 | `ARION_WEB_BIND_ADDRESS` | `127.0.0.1` | Host address where Compose publishes the web/API gateway |
@@ -105,7 +111,7 @@ Expected healthy responses are `{"status":"ok"}` and `{"status":"ready"}`. `/hea
 View logs or stop containers without deleting data:
 
 ```bash
-docker compose logs --follow web api migrate db
+docker compose logs --follow web api worker migrate db
 docker compose down
 ```
 
@@ -132,6 +138,45 @@ docker compose build web
 ```
 
 The multi-stage build verifies the official Flutter 3.44.7 archive checksum and copies only `build/web` into a pinned unprivileged Nginx runtime. Source maps are not produced, and the runtime contains neither the Flutter toolchain nor the client source tree.
+
+## Experimental YouTube acquisition
+
+This feature is for media you are authorized to acquire. It does not bypass authentication, private or age-gated media, live streams, playlists, provider restrictions, or copyright; provider behavior and terms can change. Arion never accepts an arbitrary URL or yt-dlp option from the client. Candidate discovery follows an empty local search, and download starts only after selecting a candidate and checking the authorization acknowledgement.
+
+The API and one bounded worker share PostgreSQL and the media volume. The worker runs as UID/GID `10001`, handles one job at a time, and keeps the feature idle while disabled. Defaults limit results to five, duration to 15 minutes, output to 100 MiB, retries to two, and retain terminal job records for seven days. Supported output is the existing import set; WebM Opus is remuxed without re-encoding where possible, with one M4A/AAC fallback.
+
+To enable it privately, generate a new secret outside the repository, put it only in the server `.env`, review all `ARION_YOUTUBE_*` limits in `.env.example`, and set:
+
+```dotenv
+ARION_YOUTUBE_ACQUISITION_ENABLED=true
+ARION_YOUTUBE_CANDIDATE_SECRET=<at-least-32-random-bytes>
+```
+
+Recreate `api` and `worker`, then inspect logs by job ID:
+
+```bash
+docker compose up --detach api worker
+docker compose logs --follow api worker
+```
+
+The smoke command checks pinned tools without contacting YouTube or importing anything:
+
+```bash
+docker compose run --rm worker python -m arion_api.acquisition_smoke --inspection-only
+```
+
+After choosing a small public test item you are authorized to use, the optional discovery-only check is:
+
+```bash
+docker compose run --rm worker python -m arion_api.acquisition_smoke \
+  --inspection-only \
+  --authorized-query "<authorized test asset title>" \
+  --acknowledge-authorized
+```
+
+It reports tool versions and candidate IDs and always reports `"imported": false`. It never creates a job. Failures are retried within the configured limit; an expired lease lets a restarted worker reclaim interrupted work. Disable new discovery and processing by setting the feature flag back to `false` and recreating `api` and `worker`. Existing tracks remain streamable. For rollback, preserve both volumes and use a schema-compatible prior image; do not delete volumes or run an automatic migration downgrade.
+
+Do not run yt-dlp self-update in a container. Dependency updates are code changes: review and change the exact `yt-dlp` version in `backend/pyproject.toml`, regenerate `backend/uv.lock` with the pinned uv version, run the backend/provider suites, rebuild the image, and repeat the inspection-only smoke check before deployment.
 
 ## Run directly for development
 

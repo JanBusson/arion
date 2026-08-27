@@ -33,6 +33,7 @@ final class LibraryController extends ChangeNotifier {
   AcquisitionJob? _activeJob;
   int _acquisitionGeneration = 0;
   int _discoveryGeneration = 0;
+  YouTubeDiscoveryMode _discoveryMode = YouTubeDiscoveryMode.music;
   bool _resumeStarted = false;
   bool _disposed = false;
 
@@ -49,6 +50,15 @@ final class LibraryController extends ChangeNotifier {
   bool get isDiscovering => _isDiscovering;
   String? get acquisitionError => _acquisitionError;
   AcquisitionJob? get activeJob => _activeJob;
+  YouTubeDiscoveryMode get discoveryMode => _discoveryMode;
+  String get discoveryActionLabel => switch (_discoveryMode) {
+    YouTubeDiscoveryMode.music => 'Search YouTube Music',
+    YouTubeDiscoveryMode.all => 'Search all YouTube',
+  };
+  String get discoveryRetryLabel => switch (_discoveryMode) {
+    YouTubeDiscoveryMode.music => 'Retry YouTube Music search',
+    YouTubeDiscoveryMode.all => 'Retry all YouTube search',
+  };
   bool get canSearchYouTube =>
       _query.isNotEmpty &&
       isEmpty &&
@@ -69,6 +79,16 @@ final class LibraryController extends ChangeNotifier {
   Future<void> clearSearch() => _resetAndLoad('');
 
   Future<void> retry() => _resetAndLoad(_query);
+
+  void setDiscoveryMode(YouTubeDiscoveryMode mode) {
+    if (mode == _discoveryMode) return;
+    _discoveryMode = mode;
+    _discoveryGeneration += 1;
+    _candidates.clear();
+    _acquisitionError = null;
+    _isDiscovering = false;
+    notifyListeners();
+  }
 
   Future<void> _resetAndLoad(String query) async {
     final generation = ++_generation;
@@ -115,28 +135,32 @@ final class LibraryController extends ChangeNotifier {
     if (!canSearchYouTube) return;
     final generation = ++_discoveryGeneration;
     final query = _query;
+    final mode = _discoveryMode;
     _candidates.clear();
     _acquisitionError = null;
     _isDiscovering = true;
     notifyListeners();
     try {
-      final candidates = await _api.discoverYouTube(query);
-      if (generation != _discoveryGeneration || query != _query || !isEmpty) {
+      final candidates = await _api.discoverYouTube(query, mode);
+      if (generation != _discoveryGeneration ||
+          query != _query ||
+          mode != _discoveryMode ||
+          !isEmpty) {
         return;
       }
       _candidates.addAll(candidates);
     } on CatalogException catch (error) {
-      if (generation == _discoveryGeneration) {
+      if (generation == _discoveryGeneration && mode == _discoveryMode) {
         _acquisitionError = error.code == 'youtube_acquisition_disabled'
             ? 'YouTube acquisition is disabled on this server.'
             : error.message;
       }
     } on Object {
-      if (generation == _discoveryGeneration) {
+      if (generation == _discoveryGeneration && mode == _discoveryMode) {
         _acquisitionError = 'YouTube candidates could not be loaded.';
       }
     } finally {
-      if (generation == _discoveryGeneration) {
+      if (generation == _discoveryGeneration && mode == _discoveryMode) {
         _isDiscovering = false;
         notifyListeners();
       }

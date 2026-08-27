@@ -143,6 +143,8 @@ The multi-stage build verifies the official Flutter 3.44.7 archive checksum and 
 
 This feature is for media you are authorized to acquire. It does not bypass authentication, private or age-gated media, live streams, playlists, provider restrictions, or copyright; provider behavior and terms can change. Arion never accepts an arbitrary URL or yt-dlp option from the client. Candidate discovery follows an empty local search, and download starts only after selecting a candidate and checking the authorization acknowledgement.
 
+External discovery defaults to `music`: it searches only YouTube Music song rows and presents their artists. Select `all` for unofficial remixes or video-only releases that are not classified as songs. The modes are independent—an empty or failed music search never falls back to the broad search—and the selection lasts only for the current client session. API callers may use `GET /api/v1/acquisition/youtube/candidates?q=<title>&mode=music|all`; omitting `mode` also selects `music`.
+
 The API and one bounded worker share PostgreSQL and the media volume. The worker runs as UID/GID `10001`, handles one job at a time, and keeps the feature idle while disabled. Defaults limit results to five, duration to 15 minutes, output to 100 MiB, retries to two, and retain terminal job records for seven days. Supported output is the existing import set; WebM Opus is remuxed without re-encoding where possible, with one M4A/AAC fallback.
 
 To enable it privately, generate a new secret outside the repository, put it only in the server `.env`, review all `ARION_YOUTUBE_*` limits in `.env.example`, and set:
@@ -171,12 +173,13 @@ After choosing a small public test item you are authorized to use, the optional 
 docker compose run --rm worker python -m arion_api.acquisition_smoke \
   --inspection-only \
   --authorized-query "<authorized test asset title>" \
+  --discovery-mode music \
   --acknowledge-authorized
 ```
 
-It reports tool versions and candidate IDs and always reports `"imported": false`. It never creates a job. Failures are retried within the configured limit; an expired lease lets a restarted worker reclaim interrupted work. Disable new discovery and processing by setting the feature flag back to `false` and recreating `api` and `worker`. Existing tracks remain streamable. For rollback, preserve both volumes and use a schema-compatible prior image; do not delete volumes or run an automatic migration downgrade.
+Run the same command with `--discovery-mode all` to inspect broad discovery. It reports the pinned `ytmusicapi` and tool versions, selected mode, and candidate IDs and always reports `"imported": false`; it never creates a job. Discovery logs contain only the mode, result count, duration, and stable failure event—not query text or raw provider output. Failures are retried within the configured limit; an expired lease lets a restarted worker reclaim interrupted work. Disable new discovery and processing by setting the feature flag back to `false` and recreating `api` and `worker`. Existing tracks remain streamable. For rollback, restore the previously verified API and web images together while preserving both volumes; this mode change has no database migration. Do not delete volumes or run an automatic migration downgrade.
 
-Do not run yt-dlp self-update in a container. Dependency updates are code changes: review and change the exact `yt-dlp` version in `backend/pyproject.toml`, regenerate `backend/uv.lock` with the pinned uv version, run the backend/provider suites, rebuild the image, and repeat the inspection-only smoke check before deployment.
+Do not run provider self-updates in a container. Dependency updates are code changes: review and change the exact `yt-dlp` or `ytmusicapi` version in `backend/pyproject.toml`, regenerate `backend/uv.lock` with the Dockerfile's pinned uv version, run the backend/provider suites, rebuild the image, and repeat both discovery-mode smoke checks before deployment.
 
 ## Run directly for development
 

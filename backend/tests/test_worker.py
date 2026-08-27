@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from arion_api.acquisition import AcquisitionService
 from arion_api.acquisition_provider import AcquisitionCandidate, CandidateTokenSigner
+from arion_api.acquisition_types import DiscoveryMode
 from arion_api.config import Settings
 from arion_api.errors import AcquisitionFailure
 from arion_api.metadata import InspectedMetadata, TechnicalMetadata, apply_fallbacks
@@ -67,8 +68,12 @@ class FakeProvider:
         return output
 
 
-def candidate(video_id: str = "abcdefghijk") -> AcquisitionCandidate:
+def candidate(
+    video_id: str = "abcdefghijk",
+    mode: DiscoveryMode = DiscoveryMode.ALL,
+) -> AcquisitionCandidate:
     return AcquisitionCandidate(
+        discovery_mode=mode,
         provider="youtube",
         external_id=video_id,
         title="Song",
@@ -96,9 +101,12 @@ def enqueue(
     factory: sessionmaker[Session],
     provider: FakeProvider,
     video_id: str = "abcdefghijk",
+    mode: DiscoveryMode = DiscoveryMode.ALL,
 ) -> AcquisitionJob:
     signer = CandidateTokenSigner("x" * 32)
-    token = signer.sign(candidate(video_id), now=1, ttl_seconds=4_000_000_000)
+    token = signer.sign(
+        candidate(video_id, mode), now=1, ttl_seconds=4_000_000_000
+    )
     response = AcquisitionService(
         selected,
         factory,
@@ -187,8 +195,20 @@ def test_job_creation_is_idempotent_and_content_duplicate_adds_provenance(
     selected = settings(tmp_path)
     storage = LocalMediaStorage(tmp_path)
     provider = FakeProvider()
-    first = enqueue(selected, postgres_session_factory, provider, "abcdefghijk")
-    repeated = enqueue(selected, postgres_session_factory, provider, "abcdefghijk")
+    first = enqueue(
+        selected,
+        postgres_session_factory,
+        provider,
+        "abcdefghijk",
+        DiscoveryMode.MUSIC,
+    )
+    repeated = enqueue(
+        selected,
+        postgres_session_factory,
+        provider,
+        "abcdefghijk",
+        DiscoveryMode.ALL,
+    )
     assert repeated.id == first.id
 
     active_worker = worker(selected, postgres_session_factory, storage, provider)

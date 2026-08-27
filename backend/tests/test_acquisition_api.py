@@ -7,7 +7,9 @@ from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 
+from arion_api.acquisition_types import DiscoveryMode
 from arion_api.config import Settings
+from arion_api.errors import YouTubeProviderUnavailableError
 from arion_api.main import create_app
 from arion_api.schemas import (
     AcquisitionCandidateSummary,
@@ -37,15 +39,22 @@ class FakeFactory:
 
 class StubAcquisitionService:
     def __init__(self) -> None:
-        self.discovery_calls: list[str] = []
+        self.discovery_calls: list[tuple[str, DiscoveryMode]] = []
         self.created_tokens: list[str] = []
         self.job_id = uuid4()
 
-    def discover(self, query: str) -> list[YouTubeCandidateResponse]:
-        self.discovery_calls.append(query)
+    def discover(
+        self, query: str, mode: DiscoveryMode
+    ) -> list[YouTubeCandidateResponse]:
+        self.discovery_calls.append((query, mode))
+        if query == "unavailable":
+            raise YouTubeProviderUnavailableError()
+        if query == "empty":
+            return []
         return [
             YouTubeCandidateResponse(
                 candidate_id="token." + "x" * 32,
+                discovery_mode=mode,
                 video_id="abcdefghijk",
                 title="Song",
                 channel="Artist",
@@ -121,6 +130,30 @@ def test_acquisition_endpoints_use_allow_list_and_stable_contract(tmp_path: Path
         candidates = client.get(
             "/api/v1/acquisition/youtube/candidates", params={"q": "  Song  "}
         )
+        broad = client.get(
+            "/api/v1/acquisition/youtube/candidates",
+            params={"q": "Remix", "mode": "all"},
+        )
+        explicit_music = client.get(
+            "/api/v1/acquisition/youtube/candidates",
+            params={"q": "Music", "mode": "music"},
+        )
+        unsupported = client.get(
+            "/api/v1/acquisition/youtube/candidates",
+            params={"q": "Song", "mode": "videos"},
+        )
+        oversized = client.get(
+            "/api/v1/acquisition/youtube/candidates",
+            params={"q": "Song", "mode": "m" * 1024},
+        )
+        empty = client.get(
+            "/api/v1/acquisition/youtube/candidates",
+            params={"q": "empty", "mode": "music"},
+        )
+        unavailable = client.get(
+            "/api/v1/acquisition/youtube/candidates",
+            params={"q": "unavailable", "mode": "music"},
+        )
         invalid = client.get(
             "/api/v1/acquisition/youtube/candidates", params={"q": "   "}
         )
@@ -135,7 +168,22 @@ def test_acquisition_endpoints_use_allow_list_and_stable_contract(tmp_path: Path
 
     assert candidates.status_code == 200
     assert candidates.json()["items"][0]["video_id"] == "abcdefghijk"
-    assert stub.discovery_calls == ["Song"]
+    assert candidates.json()["items"][0]["discovery_mode"] == "music"
+    assert broad.status_code == 200
+    assert explicit_music.status_code == 200
+    assert stub.discovery_calls == [
+        ("Song", DiscoveryMode.MUSIC),
+        ("Remix", DiscoveryMode.ALL),
+        ("Music", DiscoveryMode.MUSIC),
+        ("empty", DiscoveryMode.MUSIC),
+        ("unavailable", DiscoveryMode.MUSIC),
+    ]
+    assert unsupported.status_code == 422
+    assert oversized.status_code == 422
+    assert empty.status_code == 200
+    assert empty.json() == {"items": []}
+    assert unavailable.status_code == 502
+    assert unavailable.json()["detail"]["code"] == "youtube_provider_unavailable"
     assert invalid.status_code == 422
     assert created.status_code == 202
     assert fetched.status_code == 200

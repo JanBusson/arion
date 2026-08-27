@@ -15,9 +15,13 @@ import tempfile
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 from urllib.parse import urlsplit
 
+import requests
+from ytmusicapi import YTMusic
+
+from arion_api.acquisition_types import DiscoveryMode
 from arion_api.errors import AcquisitionFailure, YouTubeProviderUnavailableError
 
 logger = logging.getLogger(__name__)
@@ -25,6 +29,17 @@ logger = logging.getLogger(__name__)
 _VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 _THUMBNAIL_HOSTS = {"i.ytimg.com", "img.youtube.com", "yt3.ggpht.com"}
 _MAX_PROCESS_OUTPUT = 1024 * 1024
+_MAX_MUSIC_ARTISTS = 8
+_CANDIDATE_FIELDS = {
+    "discovery_mode",
+    "provider",
+    "external_id",
+    "title",
+    "channel",
+    "duration_seconds",
+    "thumbnail_url",
+    "page_url",
+}
 
 
 def _bounded_text(value: object, fallback: str, limit: int = 512) -> str:
@@ -51,6 +66,7 @@ def canonical_youtube_url(video_id: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class AcquisitionCandidate:
+    discovery_mode: DiscoveryMode
     provider: str
     external_id: str
     title: str
@@ -112,7 +128,22 @@ class CandidateTokenSigner:
             payload = json.loads(self._decode(encoded))
             if payload.get("v") != 1 or int(payload["exp"]) < now:
                 raise ValueError("expired token")
-            candidate = AcquisitionCandidate(**payload["candidate"])
+            candidate_payload = payload["candidate"]
+            if (
+                not isinstance(candidate_payload, dict)
+                or set(candidate_payload) != _CANDIDATE_FIELDS
+            ):
+                raise ValueError("invalid candidate payload")
+            candidate = AcquisitionCandidate(
+                discovery_mode=DiscoveryMode(candidate_payload["discovery_mode"]),
+                provider=candidate_payload["provider"],
+                external_id=candidate_payload["external_id"],
+                title=candidate_payload["title"],
+                channel=candidate_payload["channel"],
+                duration_seconds=candidate_payload["duration_seconds"],
+                thumbnail_url=candidate_payload["thumbnail_url"],
+                page_url=candidate_payload["page_url"],
+            )
             if candidate.provider != "youtube":
                 raise ValueError("provider mismatch")
             if not _VIDEO_ID.fullmatch(candidate.external_id):
@@ -284,11 +315,23 @@ class YouTubeProvider:
         except (AcquisitionFailure, json.JSONDecodeError, OSError) as error:
             logger.warning(
                 "youtube_discovery_failed",
-                extra={"event": "youtube_discovery_failed", "duration_ms": int((time.monotonic() - started) * 1000)},
+                extra={
+                    "event": "youtube_discovery_failed",
+                    "discovery_mode": DiscoveryMode.ALL.value,
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                },
             )
             raise YouTubeProviderUnavailableError() from error
         entries = payload.get("entries") if isinstance(payload, dict) else None
         if not isinstance(entries, list):
+            logger.warning(
+                "youtube_discovery_failed",
+                extra={
+                    "event": "youtube_discovery_failed",
+                    "discovery_mode": DiscoveryMode.ALL.value,
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                },
+            )
             raise YouTubeProviderUnavailableError()
         candidates: list[AcquisitionCandidate] = []
         for entry in entries:
@@ -303,6 +346,7 @@ class YouTubeProvider:
             "youtube_discovery_completed",
             extra={
                 "event": "youtube_discovery_completed",
+                "discovery_mode": DiscoveryMode.ALL.value,
                 "candidate_count": len(candidates),
                 "duration_ms": int((time.monotonic() - started) * 1000),
             },
@@ -362,6 +406,7 @@ class YouTubeProvider:
                     thumbnail = item.get("url")
                     break
         return AcquisitionCandidate(
+            discovery_mode=DiscoveryMode.ALL,
             provider="youtube",
             external_id=video_id,
             title=_bounded_text(info.get("title"), "Untitled video"),
@@ -429,3 +474,158 @@ class YouTubeProvider:
             },
         )
         return files[0]
+
+
+class MusicSearchClient(Protocol):
+    def search(
+        self,
+        query: str,
+        *,
+        filter: str,
+        limit: int,
+    ) -> list[dict[str, object]]: ...
+
+
+class _DiscoverySession(requests.Session):
+    """Requests session that applies a bounded timeout to every music search call."""
+
+    def __init__(self, timeout_seconds: float) -> None:
+        super().__init__()
+        self._timeout = (min(timeout_seconds, 5.0), timeout_seconds)
+
+    def request(  # type: ignore[override]
+        self, method: str, url: str, **kwargs: object
+    ) -> requests.Response:
+        kwargs.setdefault("timeout", self._timeout)
+        return super().request(method, url, **kwargs)
+
+
+def unauthenticated_music_client(timeout_seconds: float) -> MusicSearchClient:
+    """Create the narrow unauthenticated YouTube Music search client."""
+
+    return YTMusic(requests_session=_DiscoverySession(timeout_seconds))
+
+
+class YouTubeMusicProvider:
+    """Discover only YouTube Music song rows and map them to safe candidates."""
+
+    def __init__(
+        self,
+        client_factory: Callable[[], MusicSearchClient],
+        *,
+        candidate_limit: int,
+        max_duration_seconds: int,
+    ) -> None:
+        self._client_factory = client_factory
+        self.candidate_limit = min(candidate_limit, 5)
+        self.max_duration_seconds = max_duration_seconds
+
+    def discover(self, query: str) -> list[AcquisitionCandidate]:
+        normalized = " ".join(query.split())
+        if not normalized:
+            return []
+        started = time.monotonic()
+        try:
+            rows = self._client_factory().search(
+                normalized,
+                filter="songs",
+                limit=self.candidate_limit,
+            )
+            if not isinstance(rows, list):
+                raise ValueError("music search returned a non-list response")
+        except Exception as error:
+            logger.warning(
+                "youtube_discovery_failed",
+                extra={
+                    "event": "youtube_discovery_failed",
+                    "discovery_mode": DiscoveryMode.MUSIC.value,
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                },
+            )
+            raise YouTubeProviderUnavailableError() from error
+
+        candidates: list[AcquisitionCandidate] = []
+        for row in rows:
+            candidate = self._candidate_from_song(row)
+            if candidate is not None:
+                candidates.append(candidate)
+            if len(candidates) >= self.candidate_limit:
+                break
+        logger.info(
+            "youtube_discovery_completed",
+            extra={
+                "event": "youtube_discovery_completed",
+                "discovery_mode": DiscoveryMode.MUSIC.value,
+                "candidate_count": len(candidates),
+                "duration_ms": int((time.monotonic() - started) * 1000),
+            },
+        )
+        return candidates
+
+    def _candidate_from_song(
+        self, row: object
+    ) -> AcquisitionCandidate | None:
+        if not isinstance(row, dict) or row.get("resultType") != "song":
+            return None
+        video_id = row.get("videoId")
+        if not isinstance(video_id, str) or not _VIDEO_ID.fullmatch(video_id):
+            return None
+        title = _bounded_text(row.get("title"), "")
+        raw_artists = row.get("artists")
+        if (
+            not title
+            or not isinstance(raw_artists, list)
+            or not 1 <= len(raw_artists) <= _MAX_MUSIC_ARTISTS
+        ):
+            return None
+        artists = [
+            _bounded_text(item.get("name"), "")
+            for item in raw_artists
+            if isinstance(item, dict)
+        ]
+        artists = [artist for artist in artists if artist]
+        if not artists:
+            return None
+        channel = _bounded_text(", ".join(artists), "")
+        duration_value = row.get("duration_seconds")
+        if duration_value is None:
+            duration = None
+        elif isinstance(duration_value, int) and not isinstance(duration_value, bool):
+            duration = duration_value
+        else:
+            return None
+        if duration is not None and (
+            duration < 0 or duration > self.max_duration_seconds
+        ):
+            return None
+        return AcquisitionCandidate(
+            discovery_mode=DiscoveryMode.MUSIC,
+            provider="youtube",
+            external_id=video_id,
+            title=title,
+            channel=channel,
+            duration_seconds=duration,
+            thumbnail_url=f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg",
+            page_url=canonical_youtube_url(video_id),
+        )
+
+
+class DiscoveryProvider(Protocol):
+    def discover(self, query: str) -> list[AcquisitionCandidate]: ...
+
+
+class YouTubeDiscoveryRouter:
+    def __init__(
+        self,
+        music_provider: DiscoveryProvider,
+        all_provider: DiscoveryProvider,
+    ) -> None:
+        self._providers = {
+            DiscoveryMode.MUSIC: music_provider,
+            DiscoveryMode.ALL: all_provider,
+        }
+
+    def discover(
+        self, query: str, mode: DiscoveryMode
+    ) -> list[AcquisitionCandidate]:
+        return self._providers[mode].discover(query)

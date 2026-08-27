@@ -130,7 +130,7 @@ void main() {
 
   test('offers discovery only after an explicit empty local search', () async {
     final api = FakeCatalogApi(
-      discoveryHandler: (_) async => [sampleCandidate()],
+      discoveryHandler: (_, _) async => [sampleCandidate()],
     );
     final controller = LibraryController(api);
 
@@ -140,8 +140,73 @@ void main() {
     expect(api.discoveryCalls, isEmpty);
 
     await controller.discoverYouTube();
-    expect(api.discoveryCalls, ['missing song']);
+    expect(api.discoveryCalls, [
+      (query: 'missing song', mode: YouTubeDiscoveryMode.music),
+    ]);
     expect(controller.candidates.single.videoId, 'abcdefghijk');
+  });
+
+  test('defaults to music and changing mode does not search', () async {
+    final api = FakeCatalogApi();
+    final controller = LibraryController(api);
+
+    expect(controller.discoveryMode, YouTubeDiscoveryMode.music);
+    await controller.submitSearch('missing song');
+    controller.setDiscoveryMode(YouTubeDiscoveryMode.all);
+
+    expect(controller.discoveryMode, YouTubeDiscoveryMode.all);
+    expect(api.discoveryCalls, isEmpty);
+    expect(controller.candidates, isEmpty);
+  });
+
+  test('clears candidates and errors when changing mode', () async {
+    var fail = false;
+    final api = FakeCatalogApi(
+      discoveryHandler: (_, mode) async {
+        if (fail) throw const CatalogException('Discovery failed');
+        return [sampleCandidate(discoveryMode: mode)];
+      },
+    );
+    final controller = LibraryController(api);
+    await controller.submitSearch('missing');
+    await controller.discoverYouTube();
+    expect(controller.candidates, isNotEmpty);
+
+    controller.setDiscoveryMode(YouTubeDiscoveryMode.all);
+    expect(controller.candidates, isEmpty);
+    fail = true;
+    await controller.discoverYouTube();
+    expect(controller.acquisitionError, 'Discovery failed');
+
+    controller.setDiscoveryMode(YouTubeDiscoveryMode.music);
+    expect(controller.acquisitionError, isNull);
+  });
+
+  test('discards late results from the previous discovery mode', () async {
+    final music = Completer<List<YouTubeCandidate>>();
+    final all = Completer<List<YouTubeCandidate>>();
+    final api = FakeCatalogApi(
+      discoveryHandler: (_, mode) =>
+          mode == YouTubeDiscoveryMode.music ? music.future : all.future,
+    );
+    final controller = LibraryController(api);
+    await controller.submitSearch('missing');
+
+    final oldSearch = controller.discoverYouTube();
+    controller.setDiscoveryMode(YouTubeDiscoveryMode.all);
+    final newSearch = controller.discoverYouTube();
+    all.complete([
+      sampleCandidate(
+        title: 'All result',
+        discoveryMode: YouTubeDiscoveryMode.all,
+      ),
+    ]);
+    await newSearch;
+    music.complete([sampleCandidate(title: 'Music result')]);
+    await oldSearch;
+
+    expect(controller.candidates.single.title, 'All result');
+    expect(controller.discoveryMode, YouTubeDiscoveryMode.all);
   });
 
   test('does not offer discovery when the local search has results', () async {
@@ -164,7 +229,7 @@ void main() {
 
   test('ignores discovery results after a newer local search', () async {
     final discovery = Completer<List<YouTubeCandidate>>();
-    final api = FakeCatalogApi(discoveryHandler: (_) => discovery.future);
+    final api = FakeCatalogApi(discoveryHandler: (_, _) => discovery.future);
     final controller = LibraryController(api);
     await controller.submitSearch('old missing song');
 
@@ -189,7 +254,7 @@ void main() {
       ),
     ];
     final api = FakeCatalogApi(
-      discoveryHandler: (_) async => [sampleCandidate()],
+      discoveryHandler: (_, _) async => [sampleCandidate()],
       createJobHandler: (_) async => sampleAcquisitionJob(),
       fetchJobHandler: (_) async => responses.removeAt(0),
     );
@@ -238,7 +303,7 @@ void main() {
 
   test('prevents a duplicate submission while a job is active', () async {
     final api = FakeCatalogApi(
-      discoveryHandler: (_) async => [sampleCandidate()],
+      discoveryHandler: (_, _) async => [sampleCandidate()],
       createJobHandler: (_) async => sampleAcquisitionJob(),
       fetchJobHandler: (_) => Completer<AcquisitionJob>().future,
     );
@@ -253,7 +318,11 @@ void main() {
     await controller.startAcquisition(candidate);
     await controller.startAcquisition(candidate);
 
+    final activeJob = controller.activeJob;
+    controller.setDiscoveryMode(YouTubeDiscoveryMode.all);
+
     expect(api.createdCandidates, hasLength(1));
+    expect(controller.activeJob, same(activeJob));
     controller.dispose();
   });
 
@@ -262,7 +331,7 @@ void main() {
     () async {
       var polls = 0;
       final api = FakeCatalogApi(
-        discoveryHandler: (_) async => [sampleCandidate()],
+        discoveryHandler: (_, _) async => [sampleCandidate()],
         createJobHandler: (_) async => sampleAcquisitionJob(),
         fetchJobHandler: (_) async {
           polls += 1;

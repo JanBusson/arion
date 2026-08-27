@@ -57,9 +57,11 @@ dependencies = [
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic-settings" },
     { name = "python-multipart" },
+    { name = "requests" },
     { name = "sqlalchemy" },
     { name = "uvicorn" },
     { name = "yt-dlp", extra = ["default"] },
+    { name = "ytmusicapi" },
 ]
 
 [package.dev-dependencies]
@@ -76,9 +78,11 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4.0" },
     { name = "pydantic-settings", specifier = ">=2.10,<3.0" },
     { name = "python-multipart", specifier = ">=0.0.20,<1.0" },
+    { name = "requests", specifier = ">=2.32,<3.0" },
     { name = "sqlalchemy", specifier = ">=2.0,<3.0" },
     { name = "uvicorn", specifier = ">=0.35,<1.0" },
     { name = "yt-dlp", extras = ["default"], specifier = "==2026.8.19" },
+    { name = "ytmusicapi", specifier = "==1.12.2" },
 ]
 
 [package.metadata.requires-dev]
@@ -726,4 +730,16 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d3/e6/cceb9530e8f4e5940f6f7822d90e9d94f1b85343329a16baaf47bbbb3de1/yt_dlp_ejs-0.8.0.tar.gz", hash = "sha256:d5fa1639f63b5c4af8d932495f60689d5370f1a095782c944f7f62a303eb104e", size = 96571, upload-time = "2026-03-17T22:49:19.299Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e3/bd/520769863744b669440a924271a6159ddd82ad5ae26b4ac4d4b69e9f8d44/yt_dlp_ejs-0.8.0-py3-none-any.whl", hash = "sha256:79300e5fca7f937a1eeede11f0456862c1b41107ce1d726871e0207424f4bdb4", size = 53443, upload-time = "2026-03-17T22:49:17.736Z" },
+]
+
+[[package]]
+name = "ytmusicapi"
+version = "1.12.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f5/56/3813d8fb327f5d91777dfb715d73030324920f030ffdc10fd05fd1f79761/ytmusicapi-1.12.2.tar.gz", hash = "sha256:8674ab9a02d2c1bdf137166c78dcf4c4568360e46ede1b31549edf6750db530a", size = 663466, upload-time = "2026-08-08T18:30:29.792Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5c/b8/5a925aabd5fa7c31f20bf84d352a3fc372aa62cc0965f27dd43f8a22289f/ytmusicapi-1.12.2-py3-none-any.whl", hash = "sha256:54b42b26d76de9b954f306a44e1ba4413a830cb2c41c019d255a297af941711e", size = 110857, upload-time = "2026-08-08T18:30:28.529Z" },
 ]

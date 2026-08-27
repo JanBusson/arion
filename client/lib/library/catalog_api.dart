@@ -15,7 +15,10 @@ abstract interface class CatalogApi {
   });
 
   Future<Track> fetchTrack(String trackId);
-  Future<List<YouTubeCandidate>> discoverYouTube(String query);
+  Future<List<YouTubeCandidate>> discoverYouTube(
+    String query,
+    YouTubeDiscoveryMode mode,
+  );
   Future<AcquisitionJob> createAcquisitionJob(String candidateId);
   Future<AcquisitionJob> fetchAcquisitionJob(String jobId);
 
@@ -90,10 +93,13 @@ final class ArionApi implements CatalogApi {
   }
 
   @override
-  Future<List<YouTubeCandidate>> discoverYouTube(String query) async {
+  Future<List<YouTubeCandidate>> discoverYouTube(
+    String query,
+    YouTubeDiscoveryMode mode,
+  ) async {
     final uri = baseUrl
         .endpoint('/api/v1/acquisition/youtube/candidates')
-        .replace(queryParameters: {'q': query.trim()});
+        .replace(queryParameters: {'q': query.trim(), 'mode': mode.wireValue});
     final decoded = await _getObject(
       uri,
       invalidMessage: 'The server returned invalid candidate data.',
@@ -105,7 +111,7 @@ final class ArionApi implements CatalogApi {
       );
     }
     try {
-      return items
+      final candidates = items
           .map((item) {
             if (item is! Map<String, Object?>) {
               throw const FormatException('Candidate must be an object.');
@@ -113,6 +119,10 @@ final class ArionApi implements CatalogApi {
             return YouTubeCandidate.fromJson(item);
           })
           .toList(growable: false);
+      if (candidates.any((candidate) => candidate.discoveryMode != mode)) {
+        throw const FormatException('Candidate mode does not match request.');
+      }
+      return candidates;
     } on FormatException {
       throw const CatalogException(
         'The server returned invalid candidate data.',

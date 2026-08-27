@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from arion_api.acquisition_types import DiscoveryMode
+
 
 class TrackResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -58,6 +60,7 @@ class YouTubeCandidateResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     candidate_id: str = Field(min_length=16, max_length=4096)
+    discovery_mode: DiscoveryMode
     video_id: str = Field(pattern=r"^[A-Za-z0-9_-]{11}$")
     title: str = Field(min_length=1, max_length=512)
     channel: str = Field(min_length=1, max_length=512)

@@ -6,18 +6,22 @@ import pytest
 
 from arion_api.acquisition import AcquisitionService
 from arion_api.acquisition_provider import AcquisitionCandidate, CandidateTokenSigner
+from arion_api.acquisition_types import DiscoveryMode
 from arion_api.config import Settings
 from arion_api.errors import YouTubeAcquisitionDisabledError
 
 
 class FakeProvider:
     def __init__(self) -> None:
-        self.calls: list[str] = []
+        self.calls: list[tuple[str, DiscoveryMode]] = []
 
-    def discover(self, query: str) -> list[AcquisitionCandidate]:
-        self.calls.append(query)
+    def discover(
+        self, query: str, mode: DiscoveryMode
+    ) -> list[AcquisitionCandidate]:
+        self.calls.append((query, mode))
         return [
             AcquisitionCandidate(
+                discovery_mode=mode,
                 provider="youtube",
                 external_id="abcdefghijk",
                 title="Song",
@@ -58,4 +62,6 @@ def test_enabled_discovery_returns_signed_candidate(tmp_path: Path) -> None:
     )
     candidates = service.discover("  Song  ")
     assert candidates[0].video_id == "abcdefghijk"
+    assert candidates[0].discovery_mode is DiscoveryMode.MUSIC
+    assert fake.calls == [("  Song  ", DiscoveryMode.MUSIC)]
     assert signer.verify(candidates[0].candidate_id, now=0).external_id == "abcdefghijk"

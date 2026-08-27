@@ -182,7 +182,7 @@ docker compose up --detach api worker
 docker compose logs --follow api worker
 ```
 
-The worker uses the API image, database, and media volume, runs unprivileged with one CPU and 768 MiB limits, and processes one job at a time. Search and approval happen in the client; logs use job IDs and stable failure codes. Never add cookies, arbitrary yt-dlp flags, user-supplied URLs, or public network exposure to work around a provider rejection.
+The worker uses the API image, database, and media volume, runs unprivileged with one CPU and 768 MiB limits, and processes one job at a time. Search and approval happen in the client. Music search is the default and returns only YouTube Music Songs; use All for unofficial remixes or video-only releases. There is no automatic fallback or result merging between modes. Logs use job IDs and stable failure codes; discovery events add only mode, count, and duration and omit query text and raw provider responses. Never add cookies, arbitrary yt-dlp flags, user-supplied URLs, or public network exposure to work around a provider rejection.
 
 Inspect the toolchain without network access or import:
 
@@ -190,9 +190,9 @@ Inspect the toolchain without network access or import:
 docker compose run --rm worker python -m arion_api.acquisition_smoke --inspection-only
 ```
 
-Only after selecting a small public item you are authorized to acquire, add `--authorized-query "<title>" --acknowledge-authorized` to inspect discovery. That mode never enqueues or downloads. If a job fails, inspect `docker compose logs worker`, leave the worker running for bounded automatic retry, and verify the media volume has sufficient free space. Interrupted jobs are reclaimed after their lease expires and staging is cleaned after terminal processing.
+Only after selecting a small public item you are authorized to acquire, add `--authorized-query "<title>" --discovery-mode music --acknowledge-authorized` to inspect song discovery. Repeat with `--discovery-mode all` when broad results are required. Both modes are inspection-only: they never enqueue or download. If a job fails, inspect `docker compose logs worker`, leave the worker running for bounded automatic retry, and verify the media volume has sufficient free space. Interrupted jobs are reclaimed after their lease expires and staging is cleaned after terminal processing.
 
-To stop acquisition, set the enable flag to `false` and recreate `api` and `worker`; existing catalog media is unaffected. Roll back with paired database/media backups and a schema-compatible image. Do not remove volumes, expose PostgreSQL, run yt-dlp self-update, or automatically downgrade the schema.
+To stop acquisition, set the enable flag to `false` and recreate `api` and `worker`; existing catalog media is unaffected. Update the exactly pinned `ytmusicapi` and `yt-dlp` versions only through `backend/pyproject.toml` plus a regenerated `backend/uv.lock`, then rebuild and smoke-test both modes. Roll this client/API contract back with its previously verified paired API and web images; it adds no database migration. Do not remove volumes, expose PostgreSQL, run provider self-updates, or automatically downgrade the schema.
 
 ## Rollback
 

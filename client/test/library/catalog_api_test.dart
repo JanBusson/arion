@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:arion_client/library/catalog_api.dart';
+import 'package:arion_client/library/acquisition.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -23,8 +24,12 @@ void main() {
     'updated_at': '2026-08-23T00:00:00Z',
   };
 
-  Map<String, Object?> candidateJson({String videoId = 'abcdefghijk'}) => {
+  Map<String, Object?> candidateJson({
+    String videoId = 'abcdefghijk',
+    String mode = 'music',
+  }) => {
     'candidate_id': 'signed-candidate-token',
+    'discovery_mode': mode,
     'video_id': videoId,
     'title': 'Candidate song',
     'channel': 'Candidate artist',
@@ -39,7 +44,9 @@ void main() {
     'phase': state,
     'progress_percent': state == 'completed' ? 100 : 0,
     'attempts': 0,
-    'candidate': {...candidateJson()}..remove('candidate_id'),
+    'candidate': {...candidateJson()}
+      ..remove('candidate_id')
+      ..remove('discovery_mode'),
     'track_id': state == 'completed'
         ? '00000000-0000-0000-0000-000000000001'
         : null,
@@ -149,11 +156,15 @@ void main() {
       }),
     );
 
-    final candidates = await api.discoverYouTube('  AC/DC live  ');
+    final candidates = await api.discoverYouTube(
+      '  AC/DC live  ',
+      YouTubeDiscoveryMode.music,
+    );
 
     expect(requested.path, '/api/v1/acquisition/youtube/candidates');
-    expect(requested.queryParameters, {'q': 'AC/DC live'});
+    expect(requested.queryParameters, {'q': 'AC/DC live', 'mode': 'music'});
     expect(candidates.single.title, 'Candidate song');
+    expect(candidates.single.discoveryMode, YouTubeDiscoveryMode.music);
     expect(candidates.single.pageUrl.scheme, 'https');
   });
 
@@ -223,7 +234,7 @@ void main() {
     );
 
     await expectLater(
-      api.discoverYouTube('missing'),
+      api.discoverYouTube('missing', YouTubeDiscoveryMode.music),
       throwsA(
         isA<CatalogException>()
             .having(
@@ -263,11 +274,30 @@ void main() {
     );
 
     await expectLater(
-      api.discoverYouTube('missing'),
+      api.discoverYouTube('missing', YouTubeDiscoveryMode.music),
       throwsA(isA<CatalogException>()),
     );
     await expectLater(
       api.fetchAcquisitionJob('job-id'),
+      throwsA(isA<CatalogException>()),
+    );
+  });
+
+  test('rejects candidate responses from another discovery mode', () async {
+    final api = ArionApi(
+      baseUrl: sampleBaseUrl(),
+      client: MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'items': [candidateJson(mode: 'all')],
+          }),
+          200,
+        ),
+      ),
+    );
+
+    await expectLater(
+      api.discoverYouTube('song', YouTubeDiscoveryMode.music),
       throwsA(isA<CatalogException>()),
     );
   });

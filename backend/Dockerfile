@@ -47,6 +47,7 @@ COPY --chown=10001:10001 alembic.ini ./alembic.ini
 COPY --chown=10001:10001 migrations ./migrations
 
 RUN yt-dlp --version \
+    && python -c 'import importlib.metadata, ytmusicapi; version = importlib.metadata.version("ytmusicapi"); assert version == "1.12.2"; print(version)' \
     && test "$(node --version)" = "v${NODE_VERSION}" \
     && ffmpeg -version
 
@@ -60,7 +61,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"]
 
-CMD ["uvicorn", "arion_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "arion_api.server"]
 
 FROM builder AS test-builder
 

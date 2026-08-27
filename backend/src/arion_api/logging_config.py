@@ -1,4 +1,4 @@
-"""Sanitized structured logging for background operations."""
+"""Sanitized structured logging for API and background operations."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ _SAFE_EVENT_FIELDS = (
     "duration_ms",
     "output_bytes",
     "candidate_count",
+    "discovery_mode",
     "attempt",
     "will_retry",
     "failure_code",

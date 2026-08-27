@@ -1,4 +1,5 @@
 import 'package:arion_client/library/catalog_api.dart';
+import 'package:arion_client/library/acquisition.dart';
 import 'package:arion_client/library/library_controller.dart';
 import 'package:arion_client/library/track.dart';
 import 'package:arion_client/playback/audio_player_port.dart';
@@ -62,6 +63,10 @@ void main() {
 
       expect(find.text('First track'), findsOneWidget);
       expect(find.byIcon(Icons.music_note), findsWidgets);
+      expect(
+        find.byKey(const Key('youtube-discovery-mode-controls')),
+        findsOneWidget,
+      );
       expect(tester.takeException(), isNull);
     });
   }
@@ -134,7 +139,7 @@ void main() {
         title: 'Second candidate',
       ),
     ];
-    final api = FakeCatalogApi(discoveryHandler: (_) async => candidates);
+    final api = FakeCatalogApi(discoveryHandler: (_, _) async => candidates);
     await pumpLibrary(tester, api: api, player: FakeAudioPlayer());
     await tester.enterText(
       find.byKey(const Key('library-search-field')),
@@ -143,15 +148,65 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.search);
     await tester.pumpAndSettle();
 
-    expect(find.text('Search YouTube'), findsOneWidget);
+    expect(find.text('Search YouTube Music'), findsOneWidget);
     expect(api.discoveryCalls, isEmpty);
-    await tester.tap(find.text('Search YouTube'));
+    await tester.tap(find.text('Search YouTube Music'));
     await tester.pumpAndSettle();
 
     expect(find.text('First candidate'), findsOneWidget);
+    expect(find.text('YouTube Music song results'), findsOneWidget);
+    expect(find.textContaining('Artist: Candidate artist'), findsWidgets);
+    await tester.drag(
+      find.byKey(const Key('youtube-candidate-list')),
+      const Offset(0, -240),
+    );
+    await tester.pumpAndSettle();
     expect(find.text('Second candidate'), findsOneWidget);
     expect(find.textContaining('correct', findRichText: true), findsNothing);
     expect(api.createdCandidates, isEmpty);
+  });
+
+  testWidgets('defaults to Music and switches to All without searching', (
+    tester,
+  ) async {
+    final api = FakeCatalogApi(
+      discoveryHandler: (_, mode) async => [
+        sampleCandidate(
+          title: mode == YouTubeDiscoveryMode.music
+              ? 'Music candidate'
+              : 'Remix candidate',
+          discoveryMode: mode,
+        ),
+      ],
+    );
+    await pumpLibrary(tester, api: api, player: FakeAudioPlayer());
+    final modeGroup = tester.widget<RadioGroup<YouTubeDiscoveryMode>>(
+      find.byType(RadioGroup<YouTubeDiscoveryMode>),
+    );
+    expect(modeGroup.groupValue, YouTubeDiscoveryMode.music);
+
+    await tester.enterText(
+      find.byKey(const Key('library-search-field')),
+      'missing',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Search YouTube Music'));
+    await tester.pumpAndSettle();
+    expect(find.text('Music candidate'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('youtube-mode-all')));
+    await tester.pumpAndSettle();
+    expect(find.text('Music candidate'), findsNothing);
+    expect(find.text('Search all YouTube'), findsOneWidget);
+    expect(api.discoveryCalls, hasLength(1));
+
+    await tester.tap(find.text('Search all YouTube'));
+    await tester.pumpAndSettle();
+    expect(find.text('Remix candidate'), findsOneWidget);
+    expect(find.text('All YouTube results'), findsOneWidget);
+    expect(find.textContaining('Channel: Candidate artist'), findsOneWidget);
+    expect(api.discoveryCalls.last.mode, YouTubeDiscoveryMode.all);
   });
 
   testWidgets('requires selection and authorization before creating a job', (
@@ -159,7 +214,7 @@ void main() {
   ) async {
     final player = FakeAudioPlayer();
     final api = FakeCatalogApi(
-      discoveryHandler: (_) async => [sampleCandidate()],
+      discoveryHandler: (_, _) async => [sampleCandidate()],
       createJobHandler: (_) async => sampleAcquisitionJob(
         state: 'completed',
         phase: 'completed',
@@ -174,7 +229,7 @@ void main() {
     );
     await tester.testTextInput.receiveAction(TextInputAction.search);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Search YouTube'));
+    await tester.tap(find.text('Search YouTube Music'));
     await tester.pumpAndSettle();
 
     expect(api.createdCandidates, isEmpty);
@@ -210,7 +265,7 @@ void main() {
     tester,
   ) async {
     final api = FakeCatalogApi(
-      discoveryHandler: (_) async => [sampleCandidate()],
+      discoveryHandler: (_, _) async => [sampleCandidate()],
       createJobHandler: (_) async => sampleAcquisitionJob(),
       fetchJobHandler: (_) async => sampleAcquisitionJob(
         state: 'failed',
@@ -243,7 +298,7 @@ void main() {
     );
     await tester.testTextInput.receiveAction(TextInputAction.search);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Search YouTube'));
+    await tester.tap(find.text('Search YouTube Music'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('select-candidate-abcdefghijk')));
     await tester.pumpAndSettle();

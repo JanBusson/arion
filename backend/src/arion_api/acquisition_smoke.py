@@ -7,8 +7,16 @@ import json
 import os
 import subprocess
 from collections.abc import Sequence
+from importlib.metadata import version
 
-from arion_api.acquisition_provider import BoundedProcessRunner, YouTubeProvider
+from arion_api.acquisition_provider import (
+    BoundedProcessRunner,
+    YouTubeDiscoveryRouter,
+    YouTubeMusicProvider,
+    YouTubeProvider,
+    unauthenticated_music_client,
+)
+from arion_api.acquisition_types import DiscoveryMode
 from arion_api.config import Settings, get_settings
 
 
@@ -39,15 +47,20 @@ def inspect_toolchain(settings: Settings) -> dict[str, str]:
         "yt_dlp": _version((settings.ytdlp_executable, "--version")),
         "node": _version(("node", "--version")),
         "ffmpeg": _version((settings.ffmpeg_executable, "-version")),
+        "ytmusicapi": version("ytmusicapi"),
     }
 
 
-def inspect_discovery(settings: Settings, query: str) -> dict[str, object]:
+def inspect_discovery(
+    settings: Settings,
+    query: str,
+    mode: DiscoveryMode = DiscoveryMode.MUSIC,
+) -> dict[str, object]:
     """Inspect candidate discovery only; never enqueue, download, or import."""
 
     if not settings.youtube_acquisition_enabled:
         raise RuntimeError("YouTube acquisition is disabled")
-    provider = YouTubeProvider(
+    all_provider = YouTubeProvider(
         settings.ytdlp_executable,
         BoundedProcessRunner(),
         candidate_limit=settings.youtube_candidate_limit,
@@ -57,8 +70,19 @@ def inspect_discovery(settings: Settings, query: str) -> dict[str, object]:
         max_output_bytes=settings.youtube_max_output_bytes,
         min_free_bytes=settings.youtube_min_free_bytes,
     )
-    candidates = provider.discover(query)
+    provider = YouTubeDiscoveryRouter(
+        YouTubeMusicProvider(
+            lambda: unauthenticated_music_client(
+                settings.youtube_discovery_timeout_seconds
+            ),
+            candidate_limit=settings.youtube_candidate_limit,
+            max_duration_seconds=settings.youtube_max_duration_seconds,
+        ),
+        all_provider,
+    )
+    candidates = provider.discover(query, mode)
     return {
+        "discovery_mode": mode.value,
         "candidate_count": len(candidates),
         "video_ids": [candidate.external_id for candidate in candidates],
         "imported": False,
@@ -71,6 +95,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--inspection-only", action="store_true", required=True)
     parser.add_argument("--authorized-query")
+    parser.add_argument(
+        "--discovery-mode",
+        choices=[mode.value for mode in DiscoveryMode],
+        default=DiscoveryMode.MUSIC.value,
+    )
     parser.add_argument("--acknowledge-authorized", action="store_true")
     args = parser.parse_args(argv)
     if args.authorized_query and not args.acknowledge_authorized:
@@ -83,7 +112,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "imported": False,
     }
     if args.authorized_query:
-        result["discovery"] = inspect_discovery(settings, args.authorized_query.strip())
+        result["discovery"] = inspect_discovery(
+            settings,
+            args.authorized_query.strip(),
+            DiscoveryMode(args.discovery_mode),
+        )
     print(json.dumps(result, sort_keys=True))
     return 0
 

@@ -125,21 +125,13 @@ final class _LibraryScreenState extends State<LibraryScreen> {
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 960),
-                child: TextField(
-                  key: const Key('library-search-field'),
-                  controller: _search,
-                  textInputAction: TextInputAction.search,
-                  decoration: InputDecoration(
-                    hintText: 'Search title, artist, or album',
-                    prefixIcon: const Icon(Icons.search),
-                    suffixIcon: IconButton(
-                      tooltip: 'Clear search',
-                      onPressed: _clearSearch,
-                      icon: const Icon(Icons.clear),
-                    ),
-                    border: const OutlineInputBorder(),
+                child: ListenableBuilder(
+                  listenable: widget.library,
+                  builder: (context, _) => _SearchControls(
+                    controller: _search,
+                    library: widget.library,
+                    onClear: _clearSearch,
                   ),
-                  onSubmitted: widget.library.submitSearch,
                 ),
               ),
             ),
@@ -172,6 +164,100 @@ final class _LibraryScreenState extends State<LibraryScreen> {
     _scroll.dispose();
     super.dispose();
   }
+}
+
+final class _SearchControls extends StatelessWidget {
+  const _SearchControls({
+    required this.controller,
+    required this.library,
+    required this.onClear,
+  });
+
+  final TextEditingController controller;
+  final LibraryController library;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final search = TextField(
+        key: const Key('library-search-field'),
+        controller: controller,
+        textInputAction: TextInputAction.search,
+        decoration: InputDecoration(
+          hintText: 'Search title, artist, or album',
+          prefixIcon: const Icon(Icons.search),
+          suffixIcon: IconButton(
+            tooltip: 'Clear search',
+            onPressed: onClear,
+            icon: const Icon(Icons.clear),
+          ),
+          border: const OutlineInputBorder(),
+        ),
+        onSubmitted: library.submitSearch,
+      );
+      final modes = _DiscoveryModeChoices(
+        value: library.discoveryMode,
+        onChanged: library.setDiscoveryMode,
+      );
+      if (constraints.maxWidth >= 640) {
+        return Row(
+          children: [
+            Expanded(child: search),
+            const SizedBox(width: 12),
+            modes,
+          ],
+        );
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [search, const SizedBox(height: 4), modes],
+      );
+    },
+  );
+}
+
+final class _DiscoveryModeChoices extends StatelessWidget {
+  const _DiscoveryModeChoices({required this.value, required this.onChanged});
+
+  final YouTubeDiscoveryMode value;
+  final ValueChanged<YouTubeDiscoveryMode> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: 'External search source',
+    container: true,
+    child: RadioGroup<YouTubeDiscoveryMode>(
+      groupValue: value,
+      onChanged: (selected) {
+        if (selected != null) onChanged(selected);
+      },
+      child: Wrap(
+        key: const Key('youtube-discovery-mode-controls'),
+        spacing: 4,
+        children: [
+          _choice(YouTubeDiscoveryMode.music, 'Music'),
+          _choice(YouTubeDiscoveryMode.all, 'All'),
+        ],
+      ),
+    ),
+  );
+
+  Widget _choice(YouTubeDiscoveryMode mode, String label) => InkWell(
+    key: Key('youtube-mode-${mode.wireValue}'),
+    borderRadius: BorderRadius.circular(20),
+    onTap: () => onChanged(mode),
+    child: Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Radio<YouTubeDiscoveryMode>(value: mode),
+          Text(label),
+        ],
+      ),
+    ),
+  );
 }
 
 final class _LibraryBody extends StatelessWidget {
@@ -215,6 +301,7 @@ final class _LibraryBody extends StatelessWidget {
       if (controller.candidates.isNotEmpty) {
         return _CandidateList(
           candidates: controller.candidates,
+          mode: controller.discoveryMode,
           onSelect: onSelectCandidate,
         );
       }
@@ -223,7 +310,7 @@ final class _LibraryBody extends StatelessWidget {
           icon: Icons.download_for_offline_outlined,
           message: controller.acquisitionError!,
           actionLabel: controller.canSearchYouTube
-              ? 'Retry YouTube search'
+              ? controller.discoveryRetryLabel
               : null,
           onAction: controller.canSearchYouTube ? onDiscoverYouTube : null,
         );
@@ -233,7 +320,9 @@ final class _LibraryBody extends StatelessWidget {
         message: controller.query.isEmpty
             ? 'Your library is empty.'
             : 'No tracks match “${controller.query}”.',
-        actionLabel: controller.canSearchYouTube ? 'Search YouTube' : null,
+        actionLabel: controller.canSearchYouTube
+            ? controller.discoveryActionLabel
+            : null,
         onAction: controller.canSearchYouTube ? onDiscoverYouTube : null,
       );
     }
@@ -300,9 +389,14 @@ final class _LibraryBody extends StatelessWidget {
 }
 
 final class _CandidateList extends StatelessWidget {
-  const _CandidateList({required this.candidates, required this.onSelect});
+  const _CandidateList({
+    required this.candidates,
+    required this.mode,
+    required this.onSelect,
+  });
 
   final List<YouTubeCandidate> candidates;
+  final YouTubeDiscoveryMode mode;
   final ValueChanged<YouTubeCandidate> onSelect;
 
   @override
@@ -312,9 +406,20 @@ final class _CandidateList extends StatelessWidget {
       child: ListView.builder(
         key: const Key('youtube-candidate-list'),
         padding: const EdgeInsets.all(12),
-        itemCount: candidates.length,
+        itemCount: candidates.length + 1,
         itemBuilder: (context, index) {
-          final candidate = candidates[index];
+          if (index == 0) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+              child: Text(
+                mode == YouTubeDiscoveryMode.music
+                    ? 'YouTube Music song results'
+                    : 'All YouTube results',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            );
+          }
+          final candidate = candidates[index - 1];
           return Card(
             child: ListTile(
               leading: SizedBox.square(
@@ -329,6 +434,7 @@ final class _CandidateList extends StatelessWidget {
               ),
               title: Text(candidate.title),
               subtitle: Text(
+                '${mode == YouTubeDiscoveryMode.music ? 'Artist' : 'Channel'}: '
                 '${candidate.channel} • ${candidate.formattedDuration}',
               ),
               trailing: Wrap(

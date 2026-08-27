@@ -20,8 +20,12 @@ from arion_api.acquisition import AcquisitionService
 from arion_api.acquisition_provider import (
     BoundedProcessRunner,
     CandidateTokenSigner,
+    YouTubeDiscoveryRouter,
+    YouTubeMusicProvider,
     YouTubeProvider,
+    unauthenticated_music_client,
 )
+from arion_api.acquisition_types import DiscoveryMode
 from arion_api.config import Settings, get_settings
 from arion_api.db import SessionFactory, create_database_engine, create_session_factory
 from arion_api.errors import (
@@ -89,6 +93,16 @@ def create_app(
         max_output_bytes=selected_settings.youtube_max_output_bytes,
         min_free_bytes=selected_settings.youtube_min_free_bytes,
     )
+    selected_discovery = YouTubeDiscoveryRouter(
+        YouTubeMusicProvider(
+            lambda: unauthenticated_music_client(
+                selected_settings.youtube_discovery_timeout_seconds
+            ),
+            candidate_limit=selected_settings.youtube_candidate_limit,
+            max_duration_seconds=selected_settings.youtube_max_duration_seconds,
+        ),
+        selected_provider,
+    )
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -127,7 +141,7 @@ def create_app(
     application.state.acquisition_service = AcquisitionService(
         selected_settings,
         selected_factory,
-        selected_provider,
+        selected_discovery,
         CandidateTokenSigner(
             selected_settings.youtube_candidate_secret.get_secret_value()
         ),
@@ -215,6 +229,7 @@ def create_app(
     async def discover_youtube_candidates(
         request: Request,
         q: str = Query(min_length=1, max_length=256),
+        mode: DiscoveryMode = Query(default=DiscoveryMode.MUSIC),
     ) -> YouTubeCandidateListResponse:
         normalized = " ".join(q.split())
         if not normalized:
@@ -228,7 +243,7 @@ def create_app(
                 },
             )
         items = await run_in_threadpool(
-            request.app.state.acquisition_service.discover, normalized
+            request.app.state.acquisition_service.discover, normalized, mode
         )
         return YouTubeCandidateListResponse(items=items)
 

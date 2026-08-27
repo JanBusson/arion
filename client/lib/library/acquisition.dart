@@ -1,6 +1,22 @@
+enum YouTubeDiscoveryMode {
+  music('music'),
+  all('all');
+
+  const YouTubeDiscoveryMode(this.wireValue);
+
+  final String wireValue;
+
+  static YouTubeDiscoveryMode parse(Object? value) => switch (value) {
+    'music' => YouTubeDiscoveryMode.music,
+    'all' => YouTubeDiscoveryMode.all,
+    _ => throw const FormatException('Invalid YouTube discovery mode.'),
+  };
+}
+
 final class YouTubeCandidate {
   const YouTubeCandidate({
     required this.candidateId,
+    required this.discoveryMode,
     required this.videoId,
     required this.title,
     required this.channel,
@@ -12,6 +28,7 @@ final class YouTubeCandidate {
   factory YouTubeCandidate.fromJson(Map<String, Object?> json) =>
       YouTubeCandidate(
         candidateId: _requiredString(json, 'candidate_id'),
+        discoveryMode: YouTubeDiscoveryMode.parse(json['discovery_mode']),
         videoId: _requiredString(json, 'video_id'),
         title: _requiredString(json, 'title'),
         channel: _requiredString(json, 'channel'),
@@ -21,6 +38,7 @@ final class YouTubeCandidate {
       );
 
   final String candidateId;
+  final YouTubeDiscoveryMode? discoveryMode;
   final String videoId;
   final String title;
   final String channel;
@@ -63,6 +81,7 @@ final class AcquisitionJob {
       attempts: _requiredInt(json, 'attempts'),
       candidate: YouTubeCandidate(
         candidateId: '',
+        discoveryMode: null,
         videoId: _requiredString(candidate, 'video_id'),
         title: _requiredString(candidate, 'title'),
         channel: _requiredString(candidate, 'channel'),

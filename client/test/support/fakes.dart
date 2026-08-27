@@ -35,7 +35,10 @@ final class FakeSettingsStore implements SettingsStore {
 typedef FetchHandler =
     Future<TrackPage> Function(int limit, int offset, String? query);
 typedef DiscoveryHandler =
-    Future<List<YouTubeCandidate>> Function(String query);
+    Future<List<YouTubeCandidate>> Function(
+      String query,
+      YouTubeDiscoveryMode mode,
+    );
 typedef CreateJobHandler = Future<AcquisitionJob> Function(String candidateId);
 typedef FetchJobHandler = Future<AcquisitionJob> Function(String jobId);
 
@@ -53,7 +56,7 @@ final class FakeCatalogApi implements CatalogApi {
              limit: limit,
              offset: offset,
            )),
-       discoveryHandler = discoveryHandler ?? ((_) async => const []),
+       discoveryHandler = discoveryHandler ?? ((_, _) async => const []),
        createJobHandler =
            createJobHandler ?? ((_) async => sampleAcquisitionJob()),
        fetchJobHandler =
@@ -64,7 +67,7 @@ final class FakeCatalogApi implements CatalogApi {
   CreateJobHandler createJobHandler;
   FetchJobHandler fetchJobHandler;
   final List<({int limit, int offset, String? query})> calls = [];
-  final List<String> discoveryCalls = [];
+  final List<({String query, YouTubeDiscoveryMode mode})> discoveryCalls = [];
   final List<String> createdCandidates = [];
   final List<String> fetchedJobs = [];
   bool closed = false;
@@ -83,9 +86,12 @@ final class FakeCatalogApi implements CatalogApi {
   Future<Track> fetchTrack(String trackId) async => sampleTrack(id: trackId);
 
   @override
-  Future<List<YouTubeCandidate>> discoverYouTube(String query) {
-    discoveryCalls.add(query);
-    return discoveryHandler(query);
+  Future<List<YouTubeCandidate>> discoverYouTube(
+    String query,
+    YouTubeDiscoveryMode mode,
+  ) {
+    discoveryCalls.add((query: query, mode: mode));
+    return discoveryHandler(query, mode);
   }
 
   @override
@@ -223,8 +229,10 @@ YouTubeCandidate sampleCandidate({
   String candidateId = 'signed-candidate-token',
   String videoId = 'abcdefghijk',
   String title = 'Candidate song',
+  YouTubeDiscoveryMode discoveryMode = YouTubeDiscoveryMode.music,
 }) => YouTubeCandidate(
   candidateId: candidateId,
+  discoveryMode: discoveryMode,
   videoId: videoId,
   title: title,
   channel: 'Candidate artist',

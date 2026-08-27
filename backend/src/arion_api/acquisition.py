@@ -9,8 +9,9 @@ from uuid import UUID
 from arion_api.acquisition_provider import (
     AcquisitionCandidate,
     CandidateTokenSigner,
-    YouTubeProvider,
+    YouTubeDiscoveryRouter,
 )
+from arion_api.acquisition_types import DiscoveryMode
 from arion_api.config import Settings
 from arion_api.db import SessionFactory
 from arion_api.errors import (
@@ -34,6 +35,7 @@ def candidate_response(
 ) -> YouTubeCandidateResponse:
     return YouTubeCandidateResponse(
         candidate_id=token,
+        discovery_mode=candidate.discovery_mode,
         video_id=candidate.external_id,
         title=candidate.title,
         channel=candidate.channel,
@@ -71,7 +73,7 @@ class AcquisitionService:
         self,
         settings: Settings,
         session_factory: SessionFactory,
-        provider: YouTubeProvider,
+        provider: YouTubeDiscoveryRouter,
         signer: CandidateTokenSigner,
     ) -> None:
         self.settings = settings
@@ -83,9 +85,13 @@ class AcquisitionService:
         if not self.settings.youtube_acquisition_enabled:
             raise YouTubeAcquisitionDisabledError()
 
-    def discover(self, query: str) -> list[YouTubeCandidateResponse]:
+    def discover(
+        self,
+        query: str,
+        mode: DiscoveryMode = DiscoveryMode.MUSIC,
+    ) -> list[YouTubeCandidateResponse]:
         self._require_enabled()
-        candidates = self.provider.discover(query)
+        candidates = self.provider.discover(query, mode)
         now = int(time.time())
         return [
             candidate_response(

@@ -20,6 +20,8 @@ def test_structured_formatter_keeps_allow_listed_operational_fields() -> None:
     record.job_id = "20f7a184-04b7-414c-a8c7-dae30a2e53fd"
     record.duration_ms = 125
     record.output_bytes = 4096
+    record.discovery_mode = "music"
+    record.candidate_count = 5
     record.failure_code = "provider_failed"
     record.attempt = 1
     record.will_retry = True
@@ -32,6 +34,8 @@ def test_structured_formatter_keeps_allow_listed_operational_fields() -> None:
     assert payload["job_id"] == "20f7a184-04b7-414c-a8c7-dae30a2e53fd"
     assert payload["duration_ms"] == 125
     assert payload["output_bytes"] == 4096
+    assert payload["discovery_mode"] == "music"
+    assert payload["candidate_count"] == 5
     assert payload["failure_code"] == "provider_failed"
     assert payload["attempt"] == 1
     assert payload["will_retry"] is True

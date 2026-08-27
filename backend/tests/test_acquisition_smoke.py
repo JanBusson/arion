@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from arion_api import acquisition_smoke
+from arion_api.acquisition_types import DiscoveryMode
 from arion_api.config import Settings
 
 
@@ -28,11 +29,13 @@ def test_toolchain_inspection_uses_fixed_version_commands(
         return type("Completed", (), {"returncode": 0, "stdout": "1.2.3\n", "stderr": ""})()
 
     monkeypatch.setattr(acquisition_smoke.subprocess, "run", fake_run)
+    monkeypatch.setattr(acquisition_smoke, "version", lambda _: "1.12.2")
 
     assert acquisition_smoke.inspect_toolchain(settings(tmp_path)) == {
         "yt_dlp": "1.2.3",
         "node": "1.2.3",
         "ffmpeg": "1.2.3",
+        "ytmusicapi": "1.12.2",
     }
     assert commands == [
         ["yt-dlp", "--version"],
@@ -72,3 +75,45 @@ def test_online_discovery_requires_authorization_acknowledgement(
 def test_discovery_refuses_to_run_while_feature_is_disabled(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="disabled"):
         acquisition_smoke.inspect_discovery(settings(tmp_path), "authorized asset")
+
+
+@pytest.mark.parametrize("mode", list(DiscoveryMode))
+def test_cli_dispatches_each_authorized_discovery_mode(
+    mode: DiscoveryMode,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[str, DiscoveryMode]] = []
+    monkeypatch.setattr(acquisition_smoke, "get_settings", lambda: settings(tmp_path, enabled=True))
+    monkeypatch.setattr(acquisition_smoke, "inspect_toolchain", lambda _: {})
+    monkeypatch.setattr(
+        acquisition_smoke,
+        "inspect_discovery",
+        lambda _settings, query, selected_mode: calls.append((query, selected_mode)) or {
+            "discovery_mode": selected_mode.value,
+            "candidate_count": 0,
+            "video_ids": [],
+            "imported": False,
+        },
+    )
+
+    assert acquisition_smoke.main(
+        [
+            "--inspection-only",
+            "--authorized-query",
+            "authorized asset",
+            "--acknowledge-authorized",
+            "--discovery-mode",
+            mode.value,
+        ]
+    ) == 0
+    assert calls == [("authorized asset", mode)]
+    assert json.loads(capsys.readouterr().out)["discovery"]["discovery_mode"] == mode.value
+
+
+def test_cli_rejects_unsupported_discovery_mode() -> None:
+    with pytest.raises(SystemExit):
+        acquisition_smoke.main(
+            ["--inspection-only", "--discovery-mode", "videos"]
+        )

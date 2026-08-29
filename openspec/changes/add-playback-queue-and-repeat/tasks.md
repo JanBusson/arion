@@ -1,0 +1,26 @@
+## 1. Queue State and Editing
+
+- [ ] 1.1 Add session-local queue-entry identity, ordered queue/current-index state, repeat-mode state, and immutable controller projections; verify controller tests cover the empty defaults, repeat-off default, current/upcoming projections, and duplicate occurrences.
+- [ ] 1.2 Implement play-now, play-next, and append operations with resolved track audio URIs; verify focused controller tests cover queue replacement, insertion order, appending, empty-queue startup, non-interruption of the current source, and repeated tracks.
+- [ ] 1.3 Implement upcoming-entry removal and movement by queue-entry identity; verify focused controller tests cover first/last moves, removal, navigation availability updates, duplicate identities, rejected current/history edits, and preservation of active playback state.
+
+## 2. Navigation, Completion, and Recovery
+
+- [ ] 2.1 Implement manual next and previous navigation, the three-second restart threshold, repeat-all boundary wrapping, and repeat-current-independent manual navigation; verify controller tests cover positions below, at, and above the threshold plus every enabled/disabled boundary.
+- [ ] 2.2 Implement repeat-mode selection and exactly-once natural-completion handling for repeat off, repeat all, and repeat current; verify controller tests cover intermediate advancement, final completion, one-entry queues, wrapping, replay from zero, paused mode changes, and duplicate completion events.
+- [ ] 2.3 Integrate queue transitions with requested-versus-active source generations and the existing bounded source-load path; verify hostile controller tests cover rapid play-now/next/previous actions and late duration, position, playing, error, and completion events from superseded sources.
+- [ ] 2.4 Preserve queue and repeat state through current-entry load/playback failures while supporting retry and manual skip; verify tests cover a failing initial entry, a failure reached by automatic advancement, retry success/failure, skip-to-next, and unchanged surrounding queue order.
+- [ ] 2.5 Keep queue and repeat lifecycle scoped to the configured-server client session; verify app/controller tests demonstrate that a replacement or disposed session invalidates pending work and a fresh session starts empty with repeat off while the saved server setting remains available.
+
+## 3. Flutter Player and Queue Experience
+
+- [ ] 3.1 Keep catalog-row play as play-now and add explicit play-next and append actions using the catalog API's audio URI resolver; verify library widget tests invoke the correct controller operation and keep actions usable for duplicate selections and phone-width rows.
+- [ ] 3.2 Expand the now-playing panel with previous, next, repeat-mode, and queue controls whose labels, icons, and enabled states come from controller state; verify widget tests cover all repeat modes, navigation boundaries, loading, completion, failure/retry, and no horizontal overflow at narrow width.
+- [ ] 3.3 Add a responsive queue surface that identifies the current entry and lists, removes, and reorders upcoming occurrences by entry identity; verify widget tests cover empty/single/multi-entry queues, duplicate tracks, revised playback order, narrow bottom-sheet presentation, and constrained wide-browser presentation.
+- [ ] 3.4 Preserve the existing play/pause/replay, seeking, metadata, duration, and buffering behavior while adding queue controls; verify the existing playback and library widget suites pass without weakening their source-consistency assertions.
+
+## 4. Documentation and End-to-End Verification
+
+- [ ] 4.1 Document the session-only queue actions, repeat-off/all/current behavior, three-second previous action, and explicit exclusions of shuffle and saved playlists in the client-facing README section; verify the documented labels and behavior match the implemented UI and spec.
+- [ ] 4.2 Run `dart format --output=none --set-exit-if-changed lib test`, `flutter analyze`, and `flutter test` from `client`; verify all formatting, static analysis, controller, adapter, and widget checks pass.
+- [ ] 4.3 Build the production web client and debug Android APK, then smoke-test play-now, play-next, append, automatic advancement, previous/next, all repeat modes, queue reordering/removal, rapid switching, and failed-entry retry/skip against the private Arion server; record the exact commands and outcomes before marking the change complete.

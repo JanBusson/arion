@@ -13,7 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import '../support/fakes.dart';
 
 void main() {
-  Future<void> pumpLibrary(
+  Future<PlaybackController> pumpLibrary(
     WidgetTester tester, {
     required FakeCatalogApi api,
     required FakeAudioPlayer player,
@@ -23,17 +23,19 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    final playback = PlaybackController(player);
     await tester.pumpWidget(
       MaterialApp(
         home: LibraryScreen(
           library: LibraryController(api),
-          playback: PlaybackController(player),
+          playback: playback,
           api: api,
           onOpenSettings: () {},
         ),
       ),
     );
     await tester.pumpAndSettle();
+    return playback;
   }
 
   for (final size in [const Size(360, 760), const Size(1280, 900)]) {
@@ -313,6 +315,86 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('This item could not be acquired.'), findsOneWidget);
+  });
+
+  testWidgets('catalog actions play now, play next, and append', (
+    tester,
+  ) async {
+    final tracks = [
+      sampleTrack(id: '1', title: 'First'),
+      sampleTrack(id: '2', title: 'Second'),
+    ];
+    final api = FakeCatalogApi(
+      handler: (limit, offset, query) async =>
+          TrackPage(items: tracks, total: 2, limit: limit, offset: offset),
+    );
+    final playback = await pumpLibrary(
+      tester,
+      api: api,
+      player: FakeAudioPlayer(),
+      size: const Size(360, 760),
+    );
+
+    await tester.tap(find.byTooltip('Play First'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('queue-actions-2')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Play next'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('queue-actions-2')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add to queue'));
+    await tester.pumpAndSettle();
+
+    expect(playback.currentEntry!.track.title, 'First');
+    expect(playback.upcomingEntries.map((entry) => entry.track.title), [
+      'Second',
+      'Second',
+    ]);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('player navigation and repeat controls reflect queue state', (
+    tester,
+  ) async {
+    final tracks = [
+      sampleTrack(id: '1', title: 'First'),
+      sampleTrack(id: '2', title: 'Second'),
+    ];
+    final api = FakeCatalogApi(
+      handler: (limit, offset, query) async =>
+          TrackPage(items: tracks, total: 2, limit: limit, offset: offset),
+    );
+    final player = FakeAudioPlayer();
+    final playback = await pumpLibrary(tester, api: api, player: player);
+    await playback.playNow(tracks.first, api.audioUri('1'));
+    await playback.addToQueue(tracks.last, api.audioUri('2'));
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Repeat off'), findsOneWidget);
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(const Key('playback-next')))
+          .onPressed,
+      isNotNull,
+    );
+    await tester.tap(find.byKey(const Key('playback-repeat')));
+    await tester.pump();
+    expect(find.byTooltip('Repeat all'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('playback-repeat')));
+    await tester.pump();
+    expect(find.byTooltip('Repeat current'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('playback-next')));
+    await tester.pumpAndSettle();
+    expect(playback.currentEntry!.track.title, 'Second');
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(const Key('playback-previous')))
+          .onPressed,
+      isNotNull,
+    );
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets(

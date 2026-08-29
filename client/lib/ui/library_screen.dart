@@ -142,7 +142,15 @@ final class _LibraryScreenState extends State<LibraryScreen> {
                   controller: widget.library,
                   scrollController: _scroll,
                   coverUri: widget.api.coverUri,
-                  onPlay: (track) => widget.playback.selectAndPlay(
+                  onPlay: (track) => widget.playback.playNow(
+                    track,
+                    widget.api.audioUri(track.id),
+                  ),
+                  onPlayNext: (track) => widget.playback.playNext(
+                    track,
+                    widget.api.audioUri(track.id),
+                  ),
+                  onAddToQueue: (track) => widget.playback.addToQueue(
                     track,
                     widget.api.audioUri(track.id),
                   ),
@@ -266,6 +274,8 @@ final class _LibraryBody extends StatelessWidget {
     required this.scrollController,
     required this.coverUri,
     required this.onPlay,
+    required this.onPlayNext,
+    required this.onAddToQueue,
     required this.onDiscoverYouTube,
     required this.onSelectCandidate,
   });
@@ -274,6 +284,8 @@ final class _LibraryBody extends StatelessWidget {
   final ScrollController scrollController;
   final Uri Function(String trackId) coverUri;
   final ValueChanged<Track> onPlay;
+  final ValueChanged<Track> onPlayNext;
+  final ValueChanged<Track> onAddToQueue;
   final VoidCallback onDiscoverYouTube;
   final ValueChanged<YouTubeCandidate> onSelectCandidate;
 
@@ -377,6 +389,8 @@ final class _LibraryBody extends StatelessWidget {
                     track: track,
                     coverUri: coverUri,
                     onPlay: () => onPlay(track),
+                    onPlayNext: () => onPlayNext(track),
+                    onAddToQueue: () => onAddToQueue(track),
                   );
                 },
               ),
@@ -517,11 +531,15 @@ final class _TrackTile extends StatelessWidget {
     required this.track,
     required this.coverUri,
     required this.onPlay,
+    required this.onPlayNext,
+    required this.onAddToQueue,
   });
 
   final Track track;
   final Uri Function(String trackId) coverUri;
   final VoidCallback onPlay;
+  final VoidCallback onPlayNext;
+  final VoidCallback onAddToQueue;
 
   @override
   Widget build(BuildContext context) {
@@ -555,6 +573,30 @@ final class _TrackTile extends StatelessWidget {
               onPressed: onPlay,
               icon: const Icon(Icons.play_arrow),
             ),
+            PopupMenuButton<_TrackQueueAction>(
+              key: Key('queue-actions-${track.id}'),
+              tooltip: 'Queue options for ${track.title}',
+              onSelected: (action) {
+                switch (action) {
+                  case _TrackQueueAction.playNext:
+                    onPlayNext();
+                    return;
+                  case _TrackQueueAction.addToQueue:
+                    onAddToQueue();
+                    return;
+                }
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: _TrackQueueAction.playNext,
+                  child: Text('Play next'),
+                ),
+                PopupMenuItem(
+                  value: _TrackQueueAction.addToQueue,
+                  child: Text('Add to queue'),
+                ),
+              ],
+            ),
           ],
         ),
         onTap: onPlay,
@@ -562,6 +604,8 @@ final class _TrackTile extends StatelessWidget {
     );
   }
 }
+
+enum _TrackQueueAction { playNext, addToQueue }
 
 final class _CoverPlaceholder extends StatelessWidget {
   const _CoverPlaceholder();

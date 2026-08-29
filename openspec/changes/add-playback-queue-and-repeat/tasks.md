@@ -14,10 +14,10 @@
 
 ## 3. Flutter Player and Queue Experience
 
-- [ ] 3.1 Keep catalog-row play as play-now and add explicit play-next and append actions using the catalog API's audio URI resolver; verify library widget tests invoke the correct controller operation and keep actions usable for duplicate selections and phone-width rows.
-- [ ] 3.2 Expand the now-playing panel with previous, next, repeat-mode, and queue controls whose labels, icons, and enabled states come from controller state; verify widget tests cover all repeat modes, navigation boundaries, loading, completion, failure/retry, and no horizontal overflow at narrow width.
-- [ ] 3.3 Add a responsive queue surface that identifies the current entry and lists, removes, and reorders upcoming occurrences by entry identity; verify widget tests cover empty/single/multi-entry queues, duplicate tracks, revised playback order, narrow bottom-sheet presentation, and constrained wide-browser presentation.
-- [ ] 3.4 Preserve the existing play/pause/replay, seeking, metadata, duration, and buffering behavior while adding queue controls; verify the existing playback and library widget suites pass without weakening their source-consistency assertions.
+- [x] 3.1 Keep catalog-row play as play-now and add explicit play-next and append actions using the catalog API's audio URI resolver; verify library widget tests invoke the correct controller operation and keep actions usable for duplicate selections and phone-width rows.
+- [x] 3.2 Expand the now-playing panel with previous, next, repeat-mode, and queue controls whose labels, icons, and enabled states come from controller state; verify widget tests cover all repeat modes, navigation boundaries, loading, completion, failure/retry, and no horizontal overflow at narrow width.
+- [x] 3.3 Add a responsive queue surface that identifies the current entry and lists, removes, and reorders upcoming occurrences by entry identity; verify widget tests cover empty/single/multi-entry queues, duplicate tracks, revised playback order, narrow bottom-sheet presentation, and constrained wide-browser presentation.
+- [x] 3.4 Preserve the existing play/pause/replay, seeking, metadata, duration, and buffering behavior while adding queue controls; verify the existing playback and library widget suites pass without weakening their source-consistency assertions.
 
 ## 4. Documentation and End-to-End Verification
 

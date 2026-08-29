@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../library/track.dart';
 import '../playback/playback_controller.dart';
+import 'playback_queue_view.dart';
 
 final class NowPlayingPanel extends StatelessWidget {
   const NowPlayingPanel({required this.controller, super.key});
@@ -39,32 +40,6 @@ final class NowPlayingPanel extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      IconButton.filled(
-                        key: const Key('playback-toggle'),
-                        tooltip: controller.isCompleted
-                            ? 'Replay'
-                            : controller.isPlaying
-                            ? 'Pause'
-                            : 'Play',
-                        onPressed: controller.canControlPlayback
-                            ? controller.togglePlayback
-                            : null,
-                        icon: controller.isBuffering
-                            ? const SizedBox.square(
-                                dimension: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : Icon(
-                                controller.isPlaying
-                                    ? Icons.pause
-                                    : controller.isCompleted
-                                    ? Icons.replay
-                                    : Icons.play_arrow,
-                              ),
-                      ),
-                      const SizedBox(width: 12),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -77,8 +52,8 @@ final class NowPlayingPanel extends StatelessWidget {
                             ),
                             Text(
                               controller.isLoadingSelection
-                                  ? 'Loading audio…'
-                                  : '${track.artist} • ${track.album}',
+                                  ? 'Loading audio\u2026'
+                                  : '${track.artist} \u2022 ${track.album}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -104,6 +79,79 @@ final class NowPlayingPanel extends StatelessWidget {
                         ),
                       ),
                     ),
+                  Wrap(
+                    key: const Key('playback-queue-controls'),
+                    alignment: WrapAlignment.center,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 2,
+                    children: [
+                      IconButton(
+                        key: const Key('playback-previous'),
+                        tooltip: 'Previous',
+                        onPressed: controller.canGoPrevious
+                            ? controller.skipToPrevious
+                            : null,
+                        icon: const Icon(Icons.skip_previous),
+                      ),
+                      IconButton.filled(
+                        key: const Key('playback-toggle'),
+                        tooltip: controller.isCompleted
+                            ? 'Replay'
+                            : controller.isPlaying
+                            ? 'Pause'
+                            : 'Play',
+                        onPressed: controller.canControlPlayback
+                            ? controller.togglePlayback
+                            : null,
+                        icon: controller.isBuffering
+                            ? const SizedBox.square(
+                                dimension: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Icon(
+                                controller.isPlaying
+                                    ? Icons.pause
+                                    : controller.isCompleted
+                                    ? Icons.replay
+                                    : Icons.play_arrow,
+                              ),
+                      ),
+                      IconButton(
+                        key: const Key('playback-next'),
+                        tooltip: 'Next',
+                        onPressed: controller.canGoNext
+                            ? controller.skipToNext
+                            : null,
+                        icon: const Icon(Icons.skip_next),
+                      ),
+                      IconButton(
+                        key: const Key('playback-repeat'),
+                        tooltip: _repeatTooltip(controller.repeatMode),
+                        color: controller.repeatMode == PlaybackRepeatMode.off
+                            ? null
+                            : Theme.of(context).colorScheme.primary,
+                        onPressed: controller.hasQueue
+                            ? controller.cycleRepeatMode
+                            : null,
+                        icon: Icon(
+                          controller.repeatMode == PlaybackRepeatMode.current
+                              ? Icons.repeat_one
+                              : Icons.repeat,
+                        ),
+                      ),
+                      IconButton(
+                        key: const Key('open-playback-queue'),
+                        tooltip:
+                            'Open queue (${controller.upcomingEntries.length} upcoming)',
+                        onPressed: controller.hasQueue
+                            ? () => showPlaybackQueue(context, controller)
+                            : null,
+                        icon: const Icon(Icons.queue_music),
+                      ),
+                    ],
+                  ),
                   Row(
                     children: [
                       Text(formatDuration(controller.position)),
@@ -130,4 +178,10 @@ final class NowPlayingPanel extends StatelessWidget {
       ),
     );
   }
+
+  static String _repeatTooltip(PlaybackRepeatMode mode) => switch (mode) {
+    PlaybackRepeatMode.off => 'Repeat off',
+    PlaybackRepeatMode.all => 'Repeat all',
+    PlaybackRepeatMode.current => 'Repeat current',
+  };
 }

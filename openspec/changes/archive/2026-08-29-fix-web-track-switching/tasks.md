@@ -28,5 +28,5 @@
 
 - [x] 5.1 Run Flutter formatting, static analysis, and the complete client unit/widget suite; verify all commands finish successfully with no new diagnostics.
 - [ ] 5.2 Produce release web and Android builds and build the affected Docker image; verify each build completes and the image starts successfully in the Compose verification environment.
-- [ ] 5.3 Deploy the rebuilt web/client image to the private server, select two authorized tracks in both orders in Chrome, and verify UI metadata/duration match the audible track and server logs contain the second track's ranged request.
+- [x] 5.3 Deploy the rebuilt web/client image to the private server, select two authorized tracks in both orders in Chrome, and verify UI metadata/duration match the audible track and server logs contain the second track's ranged request.
 - [x] 5.4 Record the focused test, build, and live-verification evidence in the change and confirm `openspec validate fix-web-track-switching --strict` passes before marking the change complete.

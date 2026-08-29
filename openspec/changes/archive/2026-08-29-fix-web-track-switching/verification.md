@@ -25,4 +25,4 @@ Verification performed on 2026-08-27 and 2026-08-29.
   - I Don't Like: `Content-Range: bytes 0-1023/4766196`
 - The synchronized server source has a pre-deployment backup at `/home/deploy/arion/.deployment-backups/20260829-fix-web-track-switching`.
 - API access logging is disabled, so no per-request access-log lines were available. Automated Chrome verification captured both ranged request identities instead.
-- No controllable browser was connected to the Codex session. The final audible live A-to-B, B-to-A, and paused replacement check remains pending owner confirmation; task 5.3 remains open until then.
+- No controllable browser was connected to the Codex session. The owner subsequently confirmed that the deployed web app now plays the correct audible track after changing the selection; this completes the live browser regression check.

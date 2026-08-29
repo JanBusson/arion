@@ -63,11 +63,11 @@ The client SHALL request cover art only for tracks that report `has_cover`, and 
 - **THEN** the client displays a consistent placeholder while keeping the track usable
 
 ### Requirement: Single-track playback and seeking
-The client SHALL start the selected track from its audio endpoint, expose play, pause, replay, elapsed time, total time, buffering state, and seeking controls, and keep the visible now-playing metadata synchronized with the selected track. Selecting a different track SHALL replace the current audio source.
+The client SHALL start the selected track from its audio endpoint, expose play, pause, replay, elapsed time, total time, buffering state, and seeking controls, and keep the visible now-playing metadata, duration, position, and playback state synchronized with the audio source that successfully loaded. Selecting a different track SHALL replace the current audio source on Android and supported browsers. A pending source replacement SHALL NOT present the requested track as actively playing until its source has loaded, and only the newest pending selection SHALL be allowed to become active.
 
 #### Scenario: Start a track
 - **WHEN** the owner selects play for a catalog track
-- **THEN** the client identifies that track as now playing, loads its audio URL, and begins playback after the platform has enough data
+- **THEN** the client loads that track's audio URL and identifies it as now playing when the source is ready before beginning playback
 
 #### Scenario: Pause and resume
 - **WHEN** the owner pauses and then resumes the selected track
@@ -83,14 +83,30 @@ The client SHALL start the selected track from its audio endpoint, expose play, 
 
 #### Scenario: Replace the selected track
 - **WHEN** the owner starts a different track while one is selected
-- **THEN** the client stops using the old source, resets position state, and loads the new track's metadata and audio URL
+- **THEN** the client stops presenting or playing the old source as the new selection, resets source-specific position and duration state, requests the different track's audio URL, and synchronizes now-playing state with that source after it loads
+
+#### Scenario: Replace a paused track
+- **WHEN** the owner starts a different track while the current track is paused
+- **THEN** the client replaces the paused source and begins the different track without resuming audio from the old source
+
+#### Scenario: Resolve rapid selections
+- **WHEN** the owner selects multiple tracks before earlier source transitions finish
+- **THEN** only the most recently selected track can become active and events or completions from older transitions cannot overwrite its state
 
 ### Requirement: Playback failure recovery
-The client SHALL surface audio load and playback failures without crashing, preserve the selected track metadata, and let the owner retry the selected track.
+The client SHALL surface audio load and playback failures without crashing, bound the time spent waiting for a source transition, keep now-playing state consistent with the source that is actually active, and let the owner retry the requested track. It SHALL NOT continue presenting old audio as though a failed or stalled replacement had succeeded.
 
 #### Scenario: Audio cannot be loaded
 - **WHEN** the audio endpoint is unavailable, rejects the request, or returns media the platform cannot decode
-- **THEN** the client stops its busy state, displays a non-sensitive playback error, and offers a retry action for the selected track
+- **THEN** the client stops its busy state, displays a non-sensitive playback error for the requested track, keeps active-source state coherent, and offers a retry action
+
+#### Scenario: Source replacement stalls
+- **WHEN** loading a requested replacement source does not complete within the configured transition timeout
+- **THEN** the client stops waiting, displays a non-sensitive retryable error, and does not identify the requested track as the source of any audio that remains active
+
+#### Scenario: Retry a failed replacement
+- **WHEN** the owner retries the most recently requested track after its source failed or timed out
+- **THEN** the client attempts a fresh source transition and makes that track active only if the new attempt succeeds
 
 ### Requirement: Android and browser operation
 The same client codebase SHALL provide usable layouts on narrow Android screens and wider browser windows. Android builds SHALL be able to reach explicitly configured private HTTP servers, and browser API access SHALL be limited to server origins explicitly configured by the operator.

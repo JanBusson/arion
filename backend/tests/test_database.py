@@ -10,8 +10,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from arion_api.db import session_scope
-from arion_api.models import Track
-from arion_api.repository import TrackRepository
+from arion_api.models import AcquisitionJob, Track, TrackSource
+from arion_api.repository import AcquisitionJobRepository, TrackRepository
 from arion_api.schemas import TrackResponse
 
 
@@ -127,3 +127,139 @@ def test_digest_advisory_lock_serializes_contenders(
     first_thread.join(timeout=5)
     second_thread.join(timeout=5)
     assert second_locked.is_set()
+
+
+def make_job(external_id: str = "abcdefghijk") -> AcquisitionJob:
+    now = datetime.now(UTC)
+    return AcquisitionJob(
+        provider="youtube",
+        external_id=external_id,
+        candidate_title="Song",
+        candidate_channel="Artist",
+        candidate_duration_seconds=120,
+        candidate_thumbnail_url=None,
+        candidate_page_url=f"https://www.youtube.com/watch?v={external_id}",
+        authorization_acknowledged_at=now,
+        state="queued",
+        phase="queued",
+        progress_percent=0,
+        attempts=0,
+        updated_at=now,
+    )
+
+
+def test_acquisition_repository_lifecycle_and_provenance(
+    postgres_session_factory: sessionmaker[Session],
+) -> None:
+    with postgres_session_factory() as session, session.begin():
+        repository = AcquisitionJobRepository(session)
+        job = repository.add(make_job())
+        track = TrackRepository(session).add(make_track(digest="3" * 64))
+
+    now = datetime.now(UTC)
+    with postgres_session_factory() as session, session.begin():
+        repository = AcquisitionJobRepository(session)
+        claimed = repository.claim(
+            now=now, lease_until=now + timedelta(minutes=1), max_attempts=2
+        )
+        assert claimed is not None
+        assert claimed.id == job.id
+        assert claimed.state == "downloading"
+        assert claimed.attempts == 1
+        repository.set_phase(
+            claimed,
+            state="processing",
+            phase="importing",
+            progress_percent=85,
+            now=now,
+        )
+        repository.add_source(
+            TrackSource(
+                track_id=track.id,
+                provider="youtube",
+                external_id="abcdefghijk",
+                source_page_url="https://www.youtube.com/watch?v=abcdefghijk",
+                source_title="Song",
+                source_channel="Artist",
+            )
+        )
+        repository.complete(claimed, track.id, now=now)
+
+    with postgres_session_factory() as session:
+        stored = AcquisitionJobRepository(session).get(job.id)
+        assert stored is not None
+        assert stored.state == "completed"
+        assert stored.track_id == track.id
+        source = AcquisitionJobRepository(session).find_source(
+            "youtube", "abcdefghijk"
+        )
+        assert source is not None and source.track_id == track.id
+
+
+def test_concurrent_job_claim_has_single_owner(
+    postgres_session_factory: sessionmaker[Session],
+) -> None:
+    with postgres_session_factory() as session, session.begin():
+        AcquisitionJobRepository(session).add(make_job("concurrent1"))
+
+    first_claimed = threading.Event()
+    release_first = threading.Event()
+    results: list[bool] = []
+
+    def first() -> None:
+        now = datetime.now(UTC)
+        with postgres_session_factory() as session, session.begin():
+            job = AcquisitionJobRepository(session).claim(
+                now=now, lease_until=now + timedelta(minutes=1), max_attempts=2
+            )
+            results.append(job is not None)
+            first_claimed.set()
+            release_first.wait(timeout=5)
+
+    def second() -> None:
+        first_claimed.wait(timeout=5)
+        now = datetime.now(UTC)
+        with postgres_session_factory() as session, session.begin():
+            job = AcquisitionJobRepository(session).claim(
+                now=now, lease_until=now + timedelta(minutes=1), max_attempts=2
+            )
+            results.append(job is not None)
+
+    threads = [threading.Thread(target=first), threading.Thread(target=second)]
+    for thread in threads:
+        thread.start()
+    first_claimed.wait(timeout=5)
+    threads[1].join(timeout=5)
+    release_first.set()
+    threads[0].join(timeout=5)
+
+    assert sorted(results) == [False, True]
+
+
+def test_expired_lease_at_retry_limit_becomes_terminal_failure(
+    postgres_session_factory: sessionmaker[Session],
+) -> None:
+    now = datetime.now(UTC)
+    exhausted = make_job("exhausted01")
+    exhausted.state = "downloading"
+    exhausted.phase = "claimed"
+    exhausted.attempts = 2
+    exhausted.lease_expires_at = now - timedelta(seconds=1)
+    with postgres_session_factory() as session, session.begin():
+        session.add(exhausted)
+
+    with postgres_session_factory() as session, session.begin():
+        assert (
+            AcquisitionJobRepository(session).claim(
+                now=now,
+                lease_until=now + timedelta(minutes=1),
+                max_attempts=2,
+            )
+            is None
+        )
+
+    with postgres_session_factory() as session:
+        stored = AcquisitionJobRepository(session).get(exhausted.id)
+        assert stored is not None
+        assert stored.state == "failed"
+        assert stored.failure_code == "retry_exhausted"

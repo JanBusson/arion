@@ -7,8 +7,25 @@ x-api-environment: &api-environment
   ARION_MEDIA_ROOT: /var/lib/arion/media
   ARION_MAX_UPLOAD_BYTES: ${ARION_MAX_UPLOAD_BYTES:-524288000}
   ARION_FFPROBE_EXECUTABLE: ${ARION_FFPROBE_EXECUTABLE:-ffprobe}
+  ARION_FFMPEG_EXECUTABLE: ${ARION_FFMPEG_EXECUTABLE:-ffmpeg}
   ARION_FFPROBE_TIMEOUT_SECONDS: ${ARION_FFPROBE_TIMEOUT_SECONDS:-30}
   ARION_RECONCILIATION_GRACE_SECONDS: ${ARION_RECONCILIATION_GRACE_SECONDS:-3600}
+  ARION_CORS_ORIGINS: ${ARION_CORS_ORIGINS:-}
+  ARION_YOUTUBE_ACQUISITION_ENABLED: ${ARION_YOUTUBE_ACQUISITION_ENABLED:-false}
+  ARION_YOUTUBE_CANDIDATE_SECRET: ${ARION_YOUTUBE_CANDIDATE_SECRET:-replace-me}
+  ARION_YOUTUBE_CANDIDATE_TTL_SECONDS: ${ARION_YOUTUBE_CANDIDATE_TTL_SECONDS:-600}
+  ARION_YOUTUBE_CANDIDATE_LIMIT: ${ARION_YOUTUBE_CANDIDATE_LIMIT:-5}
+  ARION_YOUTUBE_DISCOVERY_TIMEOUT_SECONDS: ${ARION_YOUTUBE_DISCOVERY_TIMEOUT_SECONDS:-20}
+  ARION_YOUTUBE_MAX_DURATION_SECONDS: ${ARION_YOUTUBE_MAX_DURATION_SECONDS:-900}
+  ARION_YOUTUBE_MAX_OUTPUT_BYTES: ${ARION_YOUTUBE_MAX_OUTPUT_BYTES:-104857600}
+  ARION_YOUTUBE_MIN_FREE_BYTES: ${ARION_YOUTUBE_MIN_FREE_BYTES:-1073741824}
+  ARION_YOUTUBE_DOWNLOAD_TIMEOUT_SECONDS: ${ARION_YOUTUBE_DOWNLOAD_TIMEOUT_SECONDS:-600}
+  ARION_YOUTUBE_PROCESSING_TIMEOUT_SECONDS: ${ARION_YOUTUBE_PROCESSING_TIMEOUT_SECONDS:-180}
+  ARION_YOUTUBE_JOB_MAX_ATTEMPTS: ${ARION_YOUTUBE_JOB_MAX_ATTEMPTS:-2}
+  ARION_YOUTUBE_JOB_LEASE_SECONDS: ${ARION_YOUTUBE_JOB_LEASE_SECONDS:-120}
+  ARION_YOUTUBE_JOB_RETENTION_SECONDS: ${ARION_YOUTUBE_JOB_RETENTION_SECONDS:-604800}
+  ARION_YOUTUBE_WORKER_POLL_SECONDS: ${ARION_YOUTUBE_WORKER_POLL_SECONDS:-2}
+  ARION_YTDLP_EXECUTABLE: ${ARION_YTDLP_EXECUTABLE:-yt-dlp}
 
 services:
   db:
@@ -27,7 +44,7 @@ services:
     restart: unless-stopped
 
   migrate:
-    image: arion-api:local
+    image: ${ARION_API_IMAGE:-arion-api:local}
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -39,7 +56,7 @@ services:
     restart: "no"
 
   api:
-    image: arion-api:local
+    image: ${ARION_API_IMAGE:-arion-api:local}
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -63,6 +80,62 @@ services:
       timeout: 3s
       start_period: 10s
       retries: 6
+    restart: unless-stopped
+
+  worker:
+    image: ${ARION_API_IMAGE:-arion-api:local}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["python", "-m", "arion_api.worker"]
+    environment: *api-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - media_data:/var/lib/arion/media
+    healthcheck:
+      disable: true
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cpus: 1.0
+    mem_limit: 768m
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  web:
+    image: ${ARION_WEB_IMAGE:-arion-web:local}
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+      target: production
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${ARION_WEB_BIND_ADDRESS:-127.0.0.1}:${ARION_WEB_PORT:-8080}:8080"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-T",
+          "2",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:8080/index.html",
+        ]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 6
+    read_only: true
+    tmpfs:
+      - /tmp
     restart: unless-stopped
 
 volumes:

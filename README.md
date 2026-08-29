@@ -1,14 +1,14 @@
 # Arion
 
-Arion is a private, self-hosted music application and a learning project for backend, data, container, and deployment practices. The current milestone provides a FastAPI backend that imports one audio file at a time, extracts metadata, stores media on the local server, and exposes a persistent searchable track catalog.
+Arion is a private, self-hosted music application and a learning project for backend, data, container, and deployment practices. The FastAPI backend imports audio, extracts metadata, stores media on the local server, exposes a searchable catalog, and streams original audio with HTTP byte-range seeking. One Flutter client connects from Android or is served through the private web gateway to search the library and play tracks.
 
-Audio playback/streaming, Flutter clients, playlists, authentication, public exposure, online metadata services, and automated deployment are not implemented yet.
+Playlists, authentication, public exposure, online metadata services, background playback, and automated deployment are not implemented yet. Experimental owner-approved YouTube acquisition is available but disabled by default.
 
 ## Repository structure
 
 ```text
 .
-|-- .github/workflows/ci.yml       # PostgreSQL tests and production image build
+|-- .github/workflows/ci.yml       # Backend and pinned-SDK Flutter validation
 |-- backend/
 |   |-- migrations/                # Alembic schema history
 |   |-- src/arion_api/             # API, services, persistence, metadata, storage
@@ -16,9 +16,12 @@ Audio playback/streaming, Flutter clients, playlists, authentication, public exp
 |   |-- Dockerfile                 # Non-root production and explicit test targets
 |   |-- pyproject.toml             # Python project and dependency constraints
 |   `-- uv.lock                    # Reproducible dependency lock
+|-- client/                        # Flutter app, production web image, Nginx gateway, and tests
 |-- docs/server.md                 # Rootless-Docker Linux runbook
+|-- scripts/                       # Compose and black-box web gateway verification
+|-- .flutter-version               # Pinned Flutter stable SDK version
 |-- .env.example                   # Non-secret configuration example
-`-- compose.yaml                   # API, migration job, and PostgreSQL
+`-- compose.yaml                   # Web gateway, API, worker, migration job, and PostgreSQL
 ```
 
 ## Prerequisites
@@ -29,10 +32,20 @@ For direct backend development:
 - PostgreSQL 18
 - FFmpeg/`ffprobe` 7 or later
 
+For client development:
+
+- Flutter 3.44.7 stable (the version in `.flutter-version`)
+- Chrome or Edge for web development
+- Android Studio/Android SDK plus an emulator or connected device for APK work
+
+Run `flutter doctor -v` after installing Flutter. The web toolchain should list an available browser; Android builds additionally require an accepted and healthy Android toolchain.
+
 For the recommended container workflow:
 
 - Docker Engine or Docker Desktop
 - Docker Compose v2 (`docker compose`)
+
+The production web image downloads and verifies the pinned Flutter SDK while building, so the Docker Compose workflow does not require Flutter on the host.
 
 ## Configuration
 
@@ -56,10 +69,21 @@ cp .env.example .env
 | `ARION_MEDIA_ROOT` | `/var/lib/arion/media` in Compose | Root containing staging, audio, and cover objects |
 | `ARION_MAX_UPLOAD_BYTES` | `524288000` | Maximum received bytes per import (500 MiB) |
 | `ARION_FFPROBE_EXECUTABLE` | `ffprobe` | Probe executable name or path |
+| `ARION_FFMPEG_EXECUTABLE` | `ffmpeg` | Compatibility remux/transcode executable |
 | `ARION_FFPROBE_TIMEOUT_SECONDS` | `30` | Maximum probe duration |
 | `ARION_RECONCILIATION_GRACE_SECONDS` | `3600` | Minimum age before crash artifacts can be removed |
+| `ARION_CORS_ORIGINS` | empty | Comma-separated exact browser origins allowed to call the API |
+| `ARION_YOUTUBE_ACQUISITION_ENABLED` | `false` | Explicit opt-in for experimental candidate discovery and acquisition |
+| `ARION_YOUTUBE_CANDIDATE_SECRET` | `replace-me` | Private candidate-signing key; at least 32 random bytes when enabled |
+| `ARION_YOUTUBE_MAX_DURATION_SECONDS` | `900` | Maximum eligible candidate duration |
+| `ARION_YOUTUBE_MAX_OUTPUT_BYTES` | `104857600` | Maximum generated audio bytes per job |
+| `ARION_YOUTUBE_MIN_FREE_BYTES` | `1073741824` | Required free space retained during acquisition |
 | `ARION_BIND_ADDRESS` | `127.0.0.1` | Host address where Compose publishes the API |
 | `ARION_PORT` | `8000` | Published host port |
+| `ARION_WEB_BIND_ADDRESS` | `127.0.0.1` | Host address where Compose publishes the web/API gateway |
+| `ARION_WEB_PORT` | `8080` | Published web/API gateway port |
+| `ARION_API_IMAGE` | `arion-api:local` | API/migration image name; override for isolated or versioned builds |
+| `ARION_WEB_IMAGE` | `arion-web:local` | Web gateway image name; override for isolated or versioned builds |
 
 Do not commit `.env`, database dumps, credentials, private keys, real audio, or generated media.
 
@@ -72,11 +96,14 @@ docker compose up --detach --build
 docker compose ps --all
 ```
 
-Verify process liveness and dependency readiness:
+Verify the direct API and the published web gateway:
 
 ```bash
 curl --fail http://127.0.0.1:8000/health
 curl --fail http://127.0.0.1:8000/ready
+curl --fail http://127.0.0.1:8080/
+curl --fail http://127.0.0.1:8080/health
+curl --fail http://127.0.0.1:8080/ready
 ```
 
 Expected healthy responses are `{"status":"ok"}` and `{"status":"ready"}`. `/health` deliberately remains healthy during database or media-storage outages; `/ready` returns `503` and safe dependency states.
@@ -84,11 +111,75 @@ Expected healthy responses are `{"status":"ok"}` and `{"status":"ready"}`. `/hea
 View logs or stop containers without deleting data:
 
 ```bash
-docker compose logs --follow api migrate db
+docker compose logs --follow web api worker migrate db
 docker compose down
 ```
 
 Do not add `--volumes` unless permanent database and media deletion is explicitly intended and backed up.
+
+### Use the production web gateway
+
+Open `http://127.0.0.1:8080` after the stack is healthy. On first launch, enter that same origin, `http://127.0.0.1:8080`, as the Arion API address. Catalog, cover, and audio requests then use the gateway's same-origin `/api/` proxy, while `/health` and `/ready` expose the existing safe operational responses.
+
+For private-LAN use, keep the direct API on loopback and publish only the gateway on the server's fixed LAN address:
+
+```dotenv
+ARION_BIND_ADDRESS=127.0.0.1
+ARION_WEB_BIND_ADDRESS=192.168.1.50
+ARION_WEB_PORT=8080
+```
+
+Then open `http://192.168.1.50:8080` and enter that exact origin in the client. Android can use the same gateway address. The loopback defaults prevent implicit publication on all interfaces; do not replace either address with `0.0.0.0` as an ad hoc fix.
+
+Build only the deployable web image when needed:
+
+```bash
+docker compose build web
+```
+
+The multi-stage build verifies the official Flutter 3.44.7 archive checksum and copies only `build/web` into a pinned unprivileged Nginx runtime. Source maps are not produced, and the runtime contains neither the Flutter toolchain nor the client source tree.
+
+## Experimental YouTube acquisition
+
+This feature is for media you are authorized to acquire. It does not bypass authentication, private or age-gated media, live streams, playlists, provider restrictions, or copyright; provider behavior and terms can change. Arion never accepts an arbitrary URL or yt-dlp option from the client. Candidate discovery follows an empty local search, and download starts only after selecting a candidate and checking the authorization acknowledgement.
+
+External discovery defaults to `music`: it searches only YouTube Music song rows and presents their artists. Select `all` for unofficial remixes or video-only releases that are not classified as songs. The modes are independent—an empty or failed music search never falls back to the broad search—and the selection lasts only for the current client session. API callers may use `GET /api/v1/acquisition/youtube/candidates?q=<title>&mode=music|all`; omitting `mode` also selects `music`.
+
+The API and one bounded worker share PostgreSQL and the media volume. The worker runs as UID/GID `10001`, handles one job at a time, and keeps the feature idle while disabled. Defaults limit results to five, duration to 15 minutes, output to 100 MiB, retries to two, and retain terminal job records for seven days. Supported output is the existing import set; WebM Opus is remuxed without re-encoding where possible, with one M4A/AAC fallback.
+
+To enable it privately, generate a new secret outside the repository, put it only in the server `.env`, review all `ARION_YOUTUBE_*` limits in `.env.example`, and set:
+
+```dotenv
+ARION_YOUTUBE_ACQUISITION_ENABLED=true
+ARION_YOUTUBE_CANDIDATE_SECRET=<at-least-32-random-bytes>
+```
+
+Recreate `api` and `worker`, then inspect logs by job ID:
+
+```bash
+docker compose up --detach api worker
+docker compose logs --follow api worker
+```
+
+The smoke command checks pinned tools without contacting YouTube or importing anything:
+
+```bash
+docker compose run --rm worker python -m arion_api.acquisition_smoke --inspection-only
+```
+
+After choosing a small public test item you are authorized to use, the optional discovery-only check is:
+
+```bash
+docker compose run --rm worker python -m arion_api.acquisition_smoke \
+  --inspection-only \
+  --authorized-query "<authorized test asset title>" \
+  --discovery-mode music \
+  --acknowledge-authorized
+```
+
+Run the same command with `--discovery-mode all` to inspect broad discovery. It reports the pinned `ytmusicapi` and tool versions, selected mode, and candidate IDs and always reports `"imported": false`; it never creates a job. Discovery logs contain only the mode, result count, duration, and stable failure event—not query text or raw provider output. Failures are retried within the configured limit; an expired lease lets a restarted worker reclaim interrupted work. Disable new discovery and processing by setting the feature flag back to `false` and recreating `api` and `worker`. Existing tracks remain streamable. For rollback, restore the previously verified API and web images together while preserving both volumes; this mode change has no database migration. Do not delete volumes or run an automatic migration downgrade.
+
+Do not run provider self-updates in a container. Dependency updates are code changes: review and change the exact `yt-dlp` or `ytmusicapi` version in `backend/pyproject.toml`, regenerate `backend/uv.lock` with the Dockerfile's pinned uv version, run the backend/provider suites, rebuild the image, and repeat both discovery-mode smoke checks before deployment.
 
 ## Run directly for development
 
@@ -108,6 +199,48 @@ uv run --frozen --project backend uvicorn arion_api.main:app --reload --host 127
 ```
 
 Compose does not publish PostgreSQL by default. Prefer running the whole stack unless direct host debugging requires a temporary loopback-only database-port override.
+
+## Run the Flutter client
+
+Install the committed application dependencies from the repository root:
+
+```bash
+cd client
+flutter pub get --enforce-lockfile
+```
+
+On first launch, Arion asks for an absolute API URL such as `http://192.168.1.50:8000`. The accepted value is normalized and saved locally, and it can be changed later from Settings. A development or CI build can provide an initial value without embedding a production address in source code:
+
+```bash
+flutter run -d chrome --web-port 8080 \
+  --dart-define=ARION_API_BASE_URL=http://127.0.0.1:8000
+```
+
+A saved setting takes precedence over `ARION_API_BASE_URL`. A separately served development client requires its exact origin in the backend allow-list. For the command above, use this `.env` value and restart the API:
+
+```dotenv
+ARION_CORS_ORIGINS=http://localhost:8080
+```
+
+Multiple separate development origins are comma-separated. Do not use `*`; an empty value is the default and grants no cross-origin browser access. The production gateway is same-origin and does not require a CORS entry.
+
+Run client checks and create the web release:
+
+```bash
+dart format --output=none --set-exit-if-changed .
+flutter analyze
+flutter test
+flutter build web --release --no-web-resources-cdn
+```
+
+Build and install an Android debug APK when the Android toolchain is available:
+
+```bash
+flutter build apk --debug
+adb install -r build/app/outputs/flutter-apk/app-debug.apk
+```
+
+Android permits owner-configured cleartext HTTP so it can reach a private LAN server. Keep the API bound to the private network and send no credentials over HTTP. Prefer HTTPS or Tailscale before any remote access, and do not expose Arion through public port forwarding by default.
 
 ## Import and use the catalog
 
@@ -140,7 +273,23 @@ curl --fail --output cover-image \
   http://127.0.0.1:8000/api/v1/tracks/<track-id>/cover
 ```
 
-Cover retrieval returns `404` when the track has no valid embedded JPEG/PNG cover. There is intentionally no audio download or streaming endpoint yet.
+Cover retrieval returns `404` when the track has no valid embedded JPEG/PNG cover.
+
+Stream the complete original audio object:
+
+```bash
+curl --fail --output track-audio \
+  http://127.0.0.1:8000/api/v1/tracks/<track-id>/audio
+```
+
+Request an inclusive byte range, as browser and Android players do when seeking:
+
+```bash
+curl --fail --header "Range: bytes=0-65535" --output first-audio-range \
+  http://127.0.0.1:8000/api/v1/tracks/<track-id>/audio
+```
+
+A complete request returns `200`; a satisfiable single range returns `206` with `Content-Range`, `Content-Length`, and `Accept-Ranges: bytes`. Bounded (`start-end`), open-ended (`start-`), and suffix (`-length`) ranges are supported. Invalid, multiple, or unsatisfiable ranges return `416` with no audio bytes. Arion streams the imported object in bounded chunks with its canonical audio media type; it does not transcode or adapt bitrate.
 
 ## Migrations and tests
 
@@ -169,6 +318,17 @@ The container test target also contains the locked dev dependencies and suite:
 docker build --target test --tag arion-api:test ./backend
 ```
 
+With the disposable Compose stack running, exercise the production gateway and compare proxied audio responses with direct FastAPI responses:
+
+```bash
+docker compose config --format json | python scripts/verify_compose_config.py
+python scripts/verify_web_gateway.py \
+  --base-url http://127.0.0.1:8080 \
+  --direct-api-url http://127.0.0.1:8000
+```
+
+The gateway check creates a unique tiny synthetic WAV in the configured development stack. Do not run it against production data. CI also stops its disposable API briefly and verifies that the gateway returns a non-cacheable error rather than the Flutter application shell.
+
 ## Continuous integration
 
 GitHub Actions uses hosted runners for pull requests and pushes to `main` or `master`. It:
@@ -177,6 +337,8 @@ GitHub Actions uses hosted runners for pull requests and pushes to `main` or `ma
 - starts a disposable PostgreSQL 18 service
 - verifies migration upgrade, downgrade, and re-upgrade
 - runs all unit, real-parser, PostgreSQL concurrency, and API tests
+- installs Flutter 3.44.7, verifies formatting and analysis, runs client tests, and builds the web release
 - builds the non-root production image without publishing it
+- renders and checks loopback/private-LAN Compose bindings, builds the production web image, starts a disposable stack, and verifies static routes, proxying, caching, health, failure handling, and ranged playback
 
 No deployment or registry credentials are used in this milestone. See [the Linux server runbook](docs/server.md) for manual private deployment and persistent-volume operations.

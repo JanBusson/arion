@@ -66,6 +66,24 @@ class ImportService:
         stage_key, digest = stage_upload(
             source, self.storage, self.max_upload_bytes
         )
+        return self._finalize_staged(stage_key, digest, filename)
+
+    def import_path(self, path: Path, original_filename: str | None = None) -> Track:
+        """Import a worker-produced file through the exact upload finalizer."""
+
+        filename = safe_original_filename(original_filename or path.name)
+        with path.open("rb") as source:
+            stage_key, digest = stage_upload(
+                source, self.storage, self.max_upload_bytes
+            )
+        return self._finalize_staged(stage_key, digest, filename)
+
+    def _finalize_staged(
+        self,
+        stage_key: StorageKey,
+        digest: str,
+        filename: str,
+    ) -> Track:
         audio_key: StorageKey | None = None
         cover_stage_key: StorageKey | None = None
         cover_key: StorageKey | None = None

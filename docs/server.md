@@ -1,6 +1,6 @@
 # Private Linux server runbook
 
-This runbook deploys Arion through rootless Docker Compose on a private Linux server. It does not configure public access, router port forwarding, TLS, a reverse proxy, Tailscale, or automatic deployment.
+This runbook deploys Arion through rootless Docker Compose on a private Linux server. The stack includes an unprivileged Nginx container that serves the Flutter web build and proxies the private API. It does not configure public access, router port forwarding, TLS, Tailscale, or automatic deployment.
 
 ## Prerequisites and security boundary
 
@@ -9,6 +9,7 @@ This runbook deploys Arion through rootless Docker Compose on a private Linux se
 - Use a trusted checkout and private LAN address.
 - Never use `sudo` for these application procedures.
 - Never run untrusted pull-request code on this server.
+- A host Flutter SDK is not required; the pinned web-image builder provides it.
 
 Verify the rootless context:
 
@@ -28,7 +29,7 @@ cd arion
 cp .env.example .env
 ```
 
-Edit `.env` with a unique database password, using its URL-encoded value in `ARION_DATABASE_URL`, and bind only to the fixed private address:
+Edit `.env` with a unique database password, using its URL-encoded value in `ARION_DATABASE_URL`. Keep the direct API on loopback and bind only the web gateway to the fixed private address:
 
 ```dotenv
 ARION_ENVIRONMENT=production
@@ -37,8 +38,10 @@ POSTGRES_DB=arion
 POSTGRES_USER=arion
 POSTGRES_PASSWORD=<strong-private-password>
 ARION_DATABASE_URL=postgresql+psycopg://arion:<url-encoded-password>@db:5432/arion
-ARION_BIND_ADDRESS=<server-lan-ip>
+ARION_BIND_ADDRESS=127.0.0.1
 ARION_PORT=8000
+ARION_WEB_BIND_ADDRESS=<server-lan-ip>
+ARION_WEB_PORT=8080
 ```
 
 Keep the default `/var/lib/arion/media` container path. Compose stores PostgreSQL and media in rootless-Docker named volumes, avoiding fragile host UID mappings.
@@ -50,11 +53,11 @@ docker compose config --quiet
 docker compose config
 ```
 
-Confirm that the API publishes only the intended private address, PostgreSQL has no published host port, and no real credential appears in a checked-in file. Do not use `0.0.0.0` or configure router forwarding unless public exposure is designed in a later security change.
+Confirm that the web service publishes only the intended private address, the API publishes only loopback, PostgreSQL has no published host port, and no real credential appears in a checked-in file. Do not use `0.0.0.0` or configure router forwarding unless public exposure is designed in a later security change.
 
 ## First deployment
 
-Build, start PostgreSQL, run the one-shot migration, and start the API:
+Build the API and web images, start PostgreSQL, run the one-shot migration, and start the API and gateway:
 
 ```bash
 docker compose up --detach --build
@@ -66,20 +69,25 @@ The expected states are:
 - `db`: running and healthy
 - `migrate`: exited successfully with status 0
 - `api`: running and healthy
+- `worker`: running and idle while YouTube acquisition is disabled
+- `web`: running and healthy
 
 Check both operational endpoints from the server:
 
 ```bash
-curl --fail http://<server-lan-ip>:8000/health
-curl --fail http://<server-lan-ip>:8000/ready
+curl --fail http://127.0.0.1:8000/health
+curl --fail http://127.0.0.1:8000/ready
+curl --fail http://<server-lan-ip>:8080/
+curl --fail http://<server-lan-ip>:8080/health
+curl --fail http://<server-lan-ip>:8080/ready
 ```
 
-From a trusted PC on the same LAN, open `http://<server-lan-ip>:8000/health`, `http://<server-lan-ip>:8000/ready`, or `http://<server-lan-ip>:8000/docs`. If access fails, inspect the configured bind address and existing host-network policy; do not weaken server or router security as an ad hoc fix.
+The first direct API command above must use `127.0.0.1`, because the API is intentionally not published to the LAN. From a trusted PC, open `http://<server-lan-ip>:8080`, enter that same origin as the server address on first launch, then load the library and play a track. Android can use the same gateway origin. If access fails, inspect the configured bind address and existing host-network policy; do not weaken server or router security as an ad hoc fix.
 
 ## Logs and readiness diagnosis
 
 ```bash
-docker compose logs --follow api
+docker compose logs --follow web api worker
 docker compose logs migrate db
 docker compose ps --all
 ```
@@ -125,13 +133,13 @@ docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -
 Pause imports, then archive the media volume:
 
 ```bash
-docker compose stop api
+docker compose stop api worker
 docker run --rm \
   --volume arion_media_data:/data:ro \
   --volume "$PWD/backups:/backup" \
   alpine:3.22 tar -czf /backup/arion-media.tar.gz -C /data .
-docker compose start api
-curl --fail http://<server-lan-ip>:8000/ready
+docker compose start api worker
+curl --fail http://127.0.0.1:8000/ready
 ```
 
 Record the application commit/image version with the paired files. Store another encrypted copy away from the server. A backup is not trusted until a restore rehearsal succeeds.
@@ -155,12 +163,36 @@ docker compose build
 docker compose up --detach db
 docker compose run --rm migrate
 docker compose up --detach api
+docker compose up --detach worker
+docker compose up --detach web
 docker compose ps --all
-curl --fail http://<server-lan-ip>:8000/health
-curl --fail http://<server-lan-ip>:8000/ready
+curl --fail http://127.0.0.1:8000/health
+curl --fail http://<server-lan-ip>:8080/ready
+curl --fail http://<server-lan-ip>:8080/
 ```
 
 The migration job is a gate: do not start the new API if it fails. Imports and catalog edits remain in the named volumes across container restarts.
+
+## Experimental acquisition operations
+
+Keep `ARION_YOUTUBE_ACQUISITION_ENABLED=false` unless you are deliberately testing owner-authorized media. Before enabling it, generate a unique signing secret of at least 32 random bytes, store it only in `.env`, review the duration/output/free-space/time/retry limits in `.env.example`, and recreate both processes:
+
+```bash
+docker compose up --detach api worker
+docker compose logs --follow api worker
+```
+
+The worker uses the API image, database, and media volume, runs unprivileged with one CPU and 768 MiB limits, and processes one job at a time. Search and approval happen in the client. Music search is the default and returns only YouTube Music Songs; use All for unofficial remixes or video-only releases. There is no automatic fallback or result merging between modes. Logs use job IDs and stable failure codes; discovery events add only mode, count, and duration and omit query text and raw provider responses. Never add cookies, arbitrary yt-dlp flags, user-supplied URLs, or public network exposure to work around a provider rejection.
+
+Inspect the toolchain without network access or import:
+
+```bash
+docker compose run --rm worker python -m arion_api.acquisition_smoke --inspection-only
+```
+
+Only after selecting a small public item you are authorized to acquire, add `--authorized-query "<title>" --discovery-mode music --acknowledge-authorized` to inspect song discovery. Repeat with `--discovery-mode all` when broad results are required. Both modes are inspection-only: they never enqueue or download. If a job fails, inspect `docker compose logs worker`, leave the worker running for bounded automatic retry, and verify the media volume has sufficient free space. Interrupted jobs are reclaimed after their lease expires and staging is cleaned after terminal processing.
+
+To stop acquisition, set the enable flag to `false` and recreate `api` and `worker`; existing catalog media is unaffected. Update the exactly pinned `ytmusicapi` and `yt-dlp` versions only through `backend/pyproject.toml` plus a regenerated `backend/uv.lock`, then rebuild and smoke-test both modes. Roll this client/API contract back with its previously verified paired API and web images; it adds no database migration. Do not remove volumes, expose PostgreSQL, run provider self-updates, or automatically downgrade the schema.
 
 ## Rollback
 
@@ -172,3 +204,5 @@ Application rollback and data rollback are different operations:
 4. Do not automatically run `alembic downgrade`, delete volumes, or restore only one half of the backup set.
 
 If a schema/data rollback is genuinely necessary, stop writes and restore the matching PostgreSQL and media backups together. This milestone's initial migration is additive, so leaving the schema in place is normally safer than downgrading it.
+
+The web gateway has no persistent state. To roll it back independently, stop `web` and temporarily bind the preserved API publication to the private LAN address only after reviewing that exposure and updating the saved client URL. Reverting the web service never requires a database downgrade or volume deletion.

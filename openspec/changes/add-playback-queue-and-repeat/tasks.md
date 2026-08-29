@@ -21,7 +21,7 @@
 
 ## 4. Documentation and End-to-End Verification
 
-- [ ] 4.1 Document the session-only queue actions, repeat-off/all/current behavior, three-second previous action, and explicit exclusions of shuffle and saved playlists in the client-facing README section; verify the documented labels and behavior match the implemented UI and spec.
+- [x] 4.1 Document the session-only queue actions, repeat-off/all/current behavior, three-second previous action, and explicit exclusions of shuffle and saved playlists in the client-facing README section; verify the documented labels and behavior match the implemented UI and spec.
 - [ ] 4.2 Run `dart format --output=none --set-exit-if-changed lib test`, `flutter analyze`, and `flutter test` from `client`; verify all formatting, static analysis, controller, adapter, and widget checks pass.
 - [ ] 4.3 After all planned web functionality and automated checks are complete, build the production web client and smoke-test play-now, play-next, append, automatic advancement, previous/next, all repeat modes, queue reordering/removal, rapid switching, and failed-entry retry/skip against the private Arion server; record the exact commands and outcomes.
 - [ ] 4.4 Only after the web version is fully complete and verified, build the debug Android APK as the final implementation step and record the exact command and outcome before marking the change complete.

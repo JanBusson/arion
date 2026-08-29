@@ -224,6 +224,14 @@ ARION_CORS_ORIGINS=http://localhost:8080
 
 Multiple separate development origins are comma-separated. Do not use `*`; an empty value is the default and grants no cross-origin browser access. The production gateway is same-origin and does not require a CORS entry.
 
+### Playback queue and repeat
+
+Playing a library track immediately replaces the current session queue. Use the track's queue menu to **Play next** or **Add to queue** without interrupting the current audio. The player exposes previous and next controls and a queue view where upcoming occurrences can be reordered or removed; adding the same track more than once creates independent queue entries.
+
+Previous restarts the current track after more than three seconds of playback. At or before three seconds it returns to the preceding queue entry when one exists. Repeat cycles through **off**, **all**, and **current**: off stops after the final entry, all wraps the queue, and current replays the active entry. Manual navigation remains available according to queue boundaries and is not trapped by repeat-current.
+
+The queue and repeat selection live only in the current client session. Restarting the client or changing the configured Arion server clears them. This first version does not provide shuffle, saved playlists, queue synchronization, gapless playback, or background media controls.
+
 Run client checks and create the web release:
 
 ```bash

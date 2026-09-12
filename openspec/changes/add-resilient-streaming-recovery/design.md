@@ -82,6 +82,6 @@ Tests cover the policy at three layers: controller tests for timing, position re
 ## Migration Plan
 
 1. Implement and verify the controller, adapter, UI, and system-media changes on the stacked feature branch.
-2. Run the full Flutter test and analysis suites, then build and smoke-test the web client to confirm browser behavior is unchanged.
-3. After web verification is complete, build a replacement Android APK and test short and prolonged outages in foreground, background, lock-screen, and notification-control scenarios.
+2. Run the full Flutter test and analysis suites and build the web client to confirm compilation and automated browser-neutral behavior are unchanged. An interactive browser smoke test is not required for this Android-specific change.
+3. After automated regression verification is complete, build a replacement Android APK and test short and prolonged outages in foreground, background, lock-screen, and notification-control scenarios.
 4. Deploy with no backend or database migration. Roll back by reinstalling the previous APK; server and stored data remain compatible.

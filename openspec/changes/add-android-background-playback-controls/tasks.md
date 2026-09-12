@@ -1,8 +1,8 @@
 ## 1. Prerequisite and Dependencies
 
-- [ ] 1.1 Confirm the completed `add-playback-queue-and-repeat` implementation remains an ancestor of this stacked branch and establish a green controller/widget/web baseline; verify the relevant existing Flutter suites pass before background-lifecycle refactoring begins.
-- [ ] 1.2 Add exact compatible `audio_service` and direct `audio_session` dependencies while retaining the pinned `just_audio` engine; regenerate the lock file and verify dependency resolution reports the intended versions without unrelated upgrades.
-- [ ] 1.3 Add narrow system-media and audio-interruption ports plus recording fakes; verify isolated contract tests can observe published metadata/state and inject commands, focus changes, and becoming-noisy events without booting Android.
+- [x] 1.1 Confirm the completed `add-playback-queue-and-repeat` implementation remains an ancestor of this stacked branch and establish a green controller/widget/web baseline; verify the relevant existing Flutter suites pass before background-lifecycle refactoring begins.
+- [x] 1.2 Add exact compatible `audio_service` and direct `audio_session` dependencies while retaining the pinned `just_audio` engine; regenerate the lock file and verify dependency resolution reports the intended versions without unrelated upgrades.
+- [x] 1.3 Add narrow system-media and audio-interruption ports plus recording fakes; verify isolated contract tests can observe published metadata/state and inject commands, focus changes, and becoming-noisy events without booting Android.
 
 ## 2. Long-Lived Playback Session
 

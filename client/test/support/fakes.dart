@@ -7,6 +7,8 @@ import 'package:arion_client/library/acquisition.dart';
 import 'package:arion_client/library/acquisition_job_store.dart';
 import 'package:arion_client/library/track.dart';
 import 'package:arion_client/playback/audio_player_port.dart';
+import 'package:arion_client/playback/audio_interruption_port.dart';
+import 'package:arion_client/playback/system_media_port.dart';
 
 final class FakeSettingsStore implements SettingsStore {
   FakeSettingsStore({this.value, this.readError, this.writeError});
@@ -225,6 +227,66 @@ final class FakeAudioPlayer implements AudioPlayerPort {
     await positions.close();
     await durations.close();
     await errors.close();
+  }
+}
+
+final class RecordingSystemMediaPort implements SystemMediaPort {
+  final StreamController<SystemMediaCommand> _commands =
+      StreamController.broadcast();
+  final List<SystemMediaSnapshot> published = [];
+  int clearCalls = 0;
+  bool disposed = false;
+
+  @override
+  Stream<SystemMediaCommand> get commands => _commands.stream;
+
+  void send(SystemMediaCommand command) => _commands.add(command);
+
+  @override
+  Future<void> publish(SystemMediaSnapshot snapshot) async {
+    published.add(snapshot);
+  }
+
+  @override
+  Future<void> clear() async {
+    clearCalls += 1;
+  }
+
+  @override
+  Future<void> dispose() async {
+    disposed = true;
+    await _commands.close();
+  }
+}
+
+final class FakeAudioInterruptionPort implements AudioInterruptionPort {
+  final StreamController<AudioInterruptionKind> _interruptions =
+      StreamController.broadcast();
+  final StreamController<void> _becomingNoisy = StreamController.broadcast();
+  int configureCalls = 0;
+  bool disposed = false;
+
+  @override
+  Stream<AudioInterruptionKind> get interruptions => _interruptions.stream;
+
+  @override
+  Stream<void> get becomingNoisy => _becomingNoisy.stream;
+
+  void sendInterruption(AudioInterruptionKind event) =>
+      _interruptions.add(event);
+
+  void sendBecomingNoisy() => _becomingNoisy.add(null);
+
+  @override
+  Future<void> configureForMusic() async {
+    configureCalls += 1;
+  }
+
+  @override
+  Future<void> dispose() async {
+    disposed = true;
+    await _interruptions.close();
+    await _becomingNoisy.close();
   }
 }
 

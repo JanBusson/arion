@@ -5,6 +5,26 @@ import 'package:arion_client/playback/just_audio_adapter.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('uses the bounded Android forward-buffer configuration', () {
+    expect(
+      arionAndroidLoadControl.minBufferDuration,
+      const Duration(seconds: 90),
+    );
+    expect(
+      arionAndroidLoadControl.maxBufferDuration,
+      const Duration(seconds: 180),
+    );
+    expect(
+      arionAndroidLoadControl.bufferForPlaybackDuration,
+      const Duration(milliseconds: 2500),
+    );
+    expect(
+      arionAndroidLoadControl.bufferForPlaybackAfterRebufferDuration,
+      const Duration(seconds: 5),
+    );
+    expect(arionAndroidLoadControl.prioritizeTimeOverSizeThresholds, isTrue);
+  });
+
   test('recreates the engine and disposes the previous source', () async {
     final first = FakeAudioPlayerEngine(const Duration(minutes: 1));
     final second = FakeAudioPlayerEngine(const Duration(minutes: 2));

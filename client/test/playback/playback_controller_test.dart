@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:arion_client/playback/audio_player_port.dart';
 import 'package:arion_client/playback/playback_controller.dart';
+import 'package:arion_client/playback/playback_recovery_policy.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fakes.dart';
@@ -243,5 +244,284 @@ void main() {
     await controller.retry();
     expect(controller.error, isNull);
     expect(player.playCalls, 1);
+    expect(player.setUrlCalls, 2);
   });
+
+  test('keeps owner playback intent separate from engine output', () async {
+    final player = FakeAudioPlayer();
+    final controller = PlaybackController(
+      player,
+      recoveryPolicy: const PlaybackRecoveryPolicy(
+        retryDelays: [Duration.zero],
+        attemptTimeout: Duration(seconds: 1),
+      ),
+    );
+
+    await controller.selectAndPlay(
+      sampleTrack(),
+      Uri.parse('http://arion.test/audio/1'),
+    );
+    await Future<void>.delayed(Duration.zero);
+    player.playing.add(false);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.isPlaying, isFalse);
+    expect(controller.isPlaybackRequested, isTrue);
+
+    await controller.pause();
+    expect(controller.isPlaybackRequested, isFalse);
+    expect(player.pauseCalls, 1);
+  });
+
+  test(
+    'recovers the same queue entry at its last confirmed position',
+    () async {
+      final player = FakeAudioPlayer();
+      final delays = <Duration>[];
+      final controller = PlaybackController(
+        player,
+        recoveryPolicy: const PlaybackRecoveryPolicy(
+          retryDelays: [Duration.zero],
+          attemptTimeout: Duration(seconds: 1),
+        ),
+        recoveryDelay: (delay) async => delays.add(delay),
+      );
+      final first = sampleTrack(id: '1');
+      await controller.playNow(first, Uri.parse('http://arion.test/audio/1'));
+      await controller.addToQueue(
+        sampleTrack(id: '2'),
+        Uri.parse('http://arion.test/audio/2'),
+      );
+      controller.setRepeatMode(PlaybackRepeatMode.current);
+      player.positions.add(const Duration(seconds: 42));
+      await Future<void>.delayed(Duration.zero);
+
+      player.errors.add(StateError('network lost'));
+      await _waitUntil(
+        () => player.setUrlCalls == 2 && !controller.isReconnecting,
+      );
+
+      expect(delays, [Duration.zero]);
+      expect(controller.currentEntry!.track, same(first));
+      expect(controller.queueEntries, hasLength(2));
+      expect(controller.repeatMode, PlaybackRepeatMode.current);
+      expect(controller.position, const Duration(seconds: 42));
+      expect(player.lastSeek, const Duration(seconds: 42));
+      expect(player.requestedUrls, [
+        Uri.parse('http://arion.test/audio/1'),
+        Uri.parse('http://arion.test/audio/1'),
+      ]);
+      expect(player.playbackStarts, 2);
+      expect(controller.error, isNull);
+    },
+  );
+
+  test(
+    'pause cancels delayed recovery and prevents automatic resume',
+    () async {
+      final delay = Completer<void>();
+      final player = FakeAudioPlayer();
+      final controller = PlaybackController(
+        player,
+        recoveryPolicy: const PlaybackRecoveryPolicy(
+          retryDelays: [Duration(seconds: 1)],
+          attemptTimeout: Duration(seconds: 1),
+        ),
+        recoveryDelay: (_) => delay.future,
+      );
+      await controller.playNow(
+        sampleTrack(),
+        Uri.parse('http://arion.test/audio/1'),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      player.errors.add(StateError('network lost'));
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.isReconnecting, isTrue);
+      expect(controller.isPlaying, isTrue);
+
+      await controller.pause();
+      delay.complete();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.isReconnecting, isFalse);
+      expect(controller.isPlaybackRequested, isFalse);
+      expect(player.setUrlCalls, 1);
+      expect(player.playbackStarts, 1);
+    },
+  );
+
+  test('in-flight recovery cannot replace a newer selection', () async {
+    final recoveryLoad = Completer<Duration?>();
+    final player = FakeAudioPlayer()
+      ..setUrlHandler = (uri, call) {
+        if (call == 2) return recoveryLoad.future;
+        return Future<Duration?>.value(const Duration(minutes: 3));
+      };
+    final controller = PlaybackController(
+      player,
+      recoveryPolicy: const PlaybackRecoveryPolicy(
+        retryDelays: [Duration.zero],
+        attemptTimeout: Duration(seconds: 1),
+      ),
+      recoveryDelay: (_) async {},
+    );
+    await controller.playNow(
+      sampleTrack(id: '1'),
+      Uri.parse('http://arion.test/audio/1'),
+    );
+    player.positions.add(const Duration(seconds: 25));
+    await Future<void>.delayed(Duration.zero);
+    player.errors.add(StateError('network lost'));
+    await _waitUntil(() => player.setUrlCalls == 2);
+
+    final second = sampleTrack(id: '2', title: 'Second');
+    await controller.playNow(second, Uri.parse('http://arion.test/audio/2'));
+    recoveryLoad.complete(const Duration(minutes: 3));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.track, same(second));
+    expect(controller.currentEntry!.track, same(second));
+    expect(controller.position, Duration.zero);
+    expect(player.currentUrl, Uri.parse('http://arion.test/audio/2'));
+    expect(player.lastSeek, isNull);
+    expect(player.playbackStarts, 2);
+  });
+
+  test('manual retry supersedes an in-flight automatic recovery', () async {
+    final recoveryLoad = Completer<Duration?>();
+    final player = FakeAudioPlayer()
+      ..setUrlHandler = (_, call) {
+        if (call == 2) return recoveryLoad.future;
+        return Future<Duration?>.value(const Duration(minutes: 3));
+      };
+    final controller = PlaybackController(
+      player,
+      recoveryPolicy: const PlaybackRecoveryPolicy(
+        retryDelays: [Duration.zero],
+        attemptTimeout: Duration(seconds: 1),
+      ),
+      recoveryDelay: (_) async {},
+    );
+    await controller.playNow(
+      sampleTrack(),
+      Uri.parse('http://arion.test/audio/1'),
+    );
+    player.errors.add(StateError('network lost'));
+    await _waitUntil(() => player.setUrlCalls == 2);
+
+    await controller.retry();
+    recoveryLoad.complete(const Duration(minutes: 3));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(player.setUrlCalls, 3);
+    expect(player.playbackStarts, 2);
+    expect(controller.isReconnecting, isFalse);
+    expect(controller.error, isNull);
+  });
+
+  test('dispose cancels a delayed automatic recovery', () async {
+    final delay = Completer<void>();
+    final player = FakeAudioPlayer();
+    final controller = PlaybackController(
+      player,
+      recoveryPolicy: const PlaybackRecoveryPolicy(
+        retryDelays: [Duration(seconds: 1)],
+        attemptTimeout: Duration(seconds: 1),
+      ),
+      recoveryDelay: (_) => delay.future,
+    );
+    await controller.playNow(
+      sampleTrack(),
+      Uri.parse('http://arion.test/audio/1'),
+    );
+    player.errors.add(StateError('network lost'));
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.isReconnecting, isTrue);
+
+    controller.dispose();
+    delay.complete();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(player.setUrlCalls, 1);
+    expect(player.disposed, isTrue);
+  });
+
+  test(
+    'exhausts bounded recovery then supports a fresh manual retry',
+    () async {
+      var failRecovery = true;
+      final player = FakeAudioPlayer()
+        ..setUrlHandler = (_, call) async {
+          if (call > 1 && failRecovery) throw StateError('offline');
+          return const Duration(minutes: 3);
+        };
+      final controller = PlaybackController(
+        player,
+        recoveryPolicy: const PlaybackRecoveryPolicy(
+          retryDelays: [Duration.zero, Duration(seconds: 1)],
+          attemptTimeout: Duration(seconds: 1),
+        ),
+        recoveryDelay: (_) async {},
+      );
+      await controller.playNow(
+        sampleTrack(),
+        Uri.parse('http://arion.test/audio/1'),
+      );
+      player.errors.add(StateError('network lost'));
+      await _waitUntil(() => controller.error != null);
+
+      expect(player.setUrlCalls, 3);
+      expect(controller.isReconnecting, isFalse);
+      expect(controller.error, 'This track could not be played.');
+
+      failRecovery = false;
+      await controller.retry();
+      await Future<void>.delayed(Duration.zero);
+      expect(player.setUrlCalls, 4);
+      expect(controller.error, isNull);
+      expect(controller.isPlaybackRequested, isTrue);
+      expect(player.playbackStarts, 2);
+    },
+  );
+
+  test('bounds each stalled recovery attempt with a timeout', () async {
+    final stalledLoads = <Completer<Duration?>>[];
+    final player = FakeAudioPlayer()
+      ..setUrlHandler = (_, call) {
+        if (call == 1) {
+          return Future<Duration?>.value(const Duration(minutes: 3));
+        }
+        final stalled = Completer<Duration?>();
+        stalledLoads.add(stalled);
+        return stalled.future;
+      };
+    final controller = PlaybackController(
+      player,
+      recoveryPolicy: const PlaybackRecoveryPolicy(
+        retryDelays: [Duration.zero, Duration.zero],
+        attemptTimeout: Duration(milliseconds: 5),
+      ),
+      recoveryDelay: (_) async {},
+    );
+    await controller.playNow(
+      sampleTrack(),
+      Uri.parse('http://arion.test/audio/1'),
+    );
+    player.errors.add(StateError('network lost'));
+    await _waitUntil(() => controller.error != null);
+
+    expect(stalledLoads, hasLength(2));
+    expect(player.setUrlCalls, 3);
+    expect(controller.isReconnecting, isFalse);
+    expect(controller.error, 'This track could not be played.');
+  });
+}
+
+Future<void> _waitUntil(bool Function() predicate) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 2));
+  while (!predicate() && DateTime.now().isBefore(deadline)) {
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+  }
+  expect(predicate(), isTrue);
 }

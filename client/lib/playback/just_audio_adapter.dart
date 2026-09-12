@@ -7,6 +7,14 @@ import 'audio_player_port.dart';
 
 typedef AudioPlayerEngineFactory = AudioPlayerEngine Function();
 
+const arionAndroidLoadControl = AndroidLoadControl(
+  minBufferDuration: Duration(seconds: 90),
+  maxBufferDuration: Duration(seconds: 180),
+  bufferForPlaybackDuration: Duration(milliseconds: 2500),
+  bufferForPlaybackAfterRebufferDuration: Duration(seconds: 5),
+  prioritizeTimeOverSizeThresholds: true,
+);
+
 abstract interface class AudioPlayerEngine {
   Stream<bool> get playingStream;
   Stream<AudioProcessingState> get processingStateStream;
@@ -214,7 +222,13 @@ final class AudioSourceSupersededException implements Exception {
 }
 
 final class _JustAudioEngine implements AudioPlayerEngine {
-  _JustAudioEngine() : _player = AudioPlayer(handleInterruptions: false) {
+  _JustAudioEngine()
+    : _player = AudioPlayer(
+        handleInterruptions: false,
+        audioLoadConfiguration: const AudioLoadConfiguration(
+          androidLoadControl: arionAndroidLoadControl,
+        ),
+      ) {
     _eventSubscription = _player.playbackEventStream.listen(
       (_) {},
       onError: (Object error, StackTrace _) => _errors.add(error),

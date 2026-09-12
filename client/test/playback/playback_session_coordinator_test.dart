@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:arion_client/playback/audio_interruption_port.dart';
 import 'package:arion_client/playback/playback_controller.dart';
 import 'package:arion_client/playback/playback_session_coordinator.dart';
+import 'package:arion_client/playback/playback_recovery_policy.dart';
 import 'package:arion_client/playback/system_media_port.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -224,6 +225,36 @@ void main() {
     expect(session.controller, same(replacement));
     expect(media.published.length, publicationCount);
     expect(media.published.last.queue, isEmpty);
+  });
+
+  test('session replacement cancels delayed playback recovery', () async {
+    final recoveryDelay = Completer<void>();
+    final recoveryPlayer = FakeAudioPlayer();
+    final recoverySession = PlaybackSessionCoordinator(
+      createAudioPlayer: () => recoveryPlayer,
+      recoveryPolicy: const PlaybackRecoveryPolicy(
+        retryDelays: [Duration(seconds: 1)],
+        attemptTimeout: Duration(seconds: 1),
+      ),
+      recoveryDelay: (_) => recoveryDelay.future,
+    );
+    addTearDown(recoverySession.close);
+    await recoverySession.initialize();
+    final controller = (await recoverySession.replaceSession(
+      configured: true,
+    ))!;
+    await controller.playNow(sampleTrack(), Uri.parse('http://server/audio/1'));
+    recoveryPlayer.errors.add(StateError('network lost'));
+    await _settle();
+    expect(controller.isReconnecting, isTrue);
+
+    await recoverySession.replaceSession(configured: false);
+    recoveryDelay.complete();
+    await _settle();
+
+    expect(recoveryPlayer.setUrlCalls, 1);
+    expect(recoveryPlayer.disposed, isTrue);
+    expect(recoverySession.controller, isNull);
   });
 }
 

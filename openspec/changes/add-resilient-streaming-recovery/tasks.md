@@ -1,14 +1,14 @@
 ## 1. Recovery State and Policy
 
-- [ ] 1.1 Add an injectable Android recovery policy and separate playback-intent/reconnecting state to the controller, and verify unit tests distinguish owner pause from engine-generated `playing=false`
-- [ ] 1.2 Implement bounded same-entry reload, last-position seek, and intent-aware resume, and verify controller tests cover immediate and delayed successful recovery without changing queue or repeat state
-- [ ] 1.3 Invalidate recovery on pause, track selection, skip, manual retry, session reset, and disposal, and verify delayed or in-flight stale attempts cannot seek, play, or overwrite newer state
-- [ ] 1.4 Preserve terminal failure and manual retry after exhaustion or initial-load failure, and verify tests cover attempt limits, per-attempt timeouts, non-sensitive errors, and a later successful owner retry
+- [x] 1.1 Add an injectable Android recovery policy and separate playback-intent/reconnecting state to the controller, and verify unit tests distinguish owner pause from engine-generated `playing=false`
+- [x] 1.2 Implement bounded same-entry reload, last-position seek, and intent-aware resume, and verify controller tests cover immediate and delayed successful recovery without changing queue or repeat state
+- [x] 1.3 Invalidate recovery on pause, track selection, skip, manual retry, session reset, and disposal, and verify delayed or in-flight stale attempts cannot seek, play, or overwrite newer state
+- [x] 1.4 Preserve terminal failure and manual retry after exhaustion or initial-load failure, and verify tests cover attempt limits, per-attempt timeouts, non-sensitive errors, and a later successful owner retry
 
 ## 2. Android Buffering and Platform Wiring
 
-- [ ] 2.1 Configure the native Android audio engine with 90-second minimum, 180-second maximum, 2.5-second startup, and 5-second rebuffer thresholds, and verify adapter construction tests assert the bounded load-control values
-- [ ] 2.2 Enable the recovery policy only from Android playback bootstrap while leaving web defaults unchanged, and verify platform/bootstrap tests cover both enabled and disabled configurations
+- [x] 2.1 Configure the native Android audio engine with 90-second minimum, 180-second maximum, 2.5-second startup, and 5-second rebuffer thresholds, and verify adapter construction tests assert the bounded load-control values
+- [x] 2.2 Enable the recovery policy only from Android playback bootstrap while leaving web defaults unchanged, and verify platform/bootstrap tests cover both enabled and disabled configurations
 
 ## 3. Player and System-Media Presentation
 

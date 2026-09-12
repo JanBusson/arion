@@ -3,6 +3,7 @@ import 'dart:async';
 import 'audio_interruption_port.dart';
 import 'audio_player_port.dart';
 import 'playback_controller.dart';
+import 'playback_recovery_policy.dart';
 import 'system_media_port.dart';
 
 typedef PlaybackAudioPlayerFactory = AudioPlayerPort Function();
@@ -13,15 +14,20 @@ final class PlaybackSessionCoordinator {
     SystemMediaPort? systemMedia,
     AudioInterruptionPort? audioInterruptions,
     this.seekIncrement = const Duration(seconds: 10),
+    this.recoveryPolicy = PlaybackRecoveryPolicy.disabled,
+    PlaybackRecoveryDelay recoveryDelay = defaultPlaybackRecoveryDelay,
   }) : _audioPlayerFactory = createAudioPlayer,
        _systemMedia = systemMedia ?? const NoopSystemMediaPort(),
        _audioInterruptions =
-           audioInterruptions ?? const NoopAudioInterruptionPort();
+           audioInterruptions ?? const NoopAudioInterruptionPort(),
+       _recoveryDelay = recoveryDelay;
 
   final PlaybackAudioPlayerFactory _audioPlayerFactory;
   final SystemMediaPort _systemMedia;
   final AudioInterruptionPort _audioInterruptions;
   final Duration seekIncrement;
+  final PlaybackRecoveryPolicy recoveryPolicy;
+  final PlaybackRecoveryDelay _recoveryDelay;
 
   PlaybackController? _controller;
   StreamSubscription<SystemMediaCommand>? _commandSubscription;
@@ -65,7 +71,11 @@ final class PlaybackSessionCoordinator {
     if (generation != _sessionGeneration || !configured || _closed) {
       return null;
     }
-    final nextController = PlaybackController(_audioPlayerFactory());
+    final nextController = PlaybackController(
+      _audioPlayerFactory(),
+      recoveryPolicy: recoveryPolicy,
+      recoveryDelay: _recoveryDelay,
+    );
     _controller = nextController;
     nextController.addListener(_controllerChanged);
     _controllerChanged();

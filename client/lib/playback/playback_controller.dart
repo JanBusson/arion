@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../library/track.dart';
 import 'audio_player_port.dart';
+import 'playback_recovery_policy.dart';
 
 enum PlaybackRepeatMode { off, all, current }
 
@@ -25,7 +26,9 @@ final class PlaybackController extends ChangeNotifier {
   PlaybackController(
     this._player, {
     this.sourceLoadTimeout = const Duration(seconds: 15),
-  }) {
+    this.recoveryPolicy = PlaybackRecoveryPolicy.disabled,
+    PlaybackRecoveryDelay recoveryDelay = defaultPlaybackRecoveryDelay,
+  }) : _recoveryDelay = recoveryDelay {
     _subscriptions = [
       _player.playingStream.listen((value) {
         if (!_acceptPlayerEvents) return;
@@ -59,7 +62,7 @@ final class PlaybackController extends ChangeNotifier {
         }
       }),
       _player.errorStream.listen((_) {
-        if (_acceptPlayerEvents) _setError();
+        if (_acceptPlayerEvents) _handlePlayerError();
       }),
     ];
   }
@@ -68,6 +71,8 @@ final class PlaybackController extends ChangeNotifier {
 
   final AudioPlayerPort _player;
   final Duration sourceLoadTimeout;
+  final PlaybackRecoveryPolicy recoveryPolicy;
+  final PlaybackRecoveryDelay _recoveryDelay;
   late final List<StreamSubscription<Object?>> _subscriptions;
 
   final List<PlaybackQueueEntry> _queue = [];
@@ -80,6 +85,9 @@ final class PlaybackController extends ChangeNotifier {
   Track? _requestedTrack;
   Uri? _requestedAudioUri;
   bool _isPlaying = false;
+  bool _playbackRequested = false;
+  bool _isReconnecting = false;
+  bool _sourceNeedsReload = false;
   bool _acceptPlayerEvents = false;
   bool _completionArmed = true;
   AudioProcessingState _processingState = AudioProcessingState.idle;
@@ -87,6 +95,7 @@ final class PlaybackController extends ChangeNotifier {
   Duration? _playerDuration;
   String? _error;
   int _sourceGeneration = 0;
+  int _recoveryGeneration = 0;
 
   List<PlaybackQueueEntry> get queueEntries =>
       List<PlaybackQueueEntry>.unmodifiable(_queue);
@@ -104,7 +113,9 @@ final class PlaybackController extends ChangeNotifier {
   Track? get track => _track;
   Track? get requestedTrack => _requestedTrack;
   Track? get visibleTrack => currentEntry?.track ?? _track ?? _requestedTrack;
-  bool get isPlaying => _isPlaying;
+  bool get isPlaying => _isReconnecting ? _playbackRequested : _isPlaying;
+  bool get isPlaybackRequested => _playbackRequested;
+  bool get isReconnecting => _isReconnecting;
   AudioProcessingState get processingState => _processingState;
   Duration get position => _position;
   String? get error => _error;
@@ -115,6 +126,7 @@ final class PlaybackController extends ChangeNotifier {
       _track != null && !isLoadingSelection && _error == null;
   bool get isBuffering =>
       isLoadingSelection ||
+      _isReconnecting ||
       _processingState == AudioProcessingState.loading ||
       _processingState == AudioProcessingState.buffering;
   bool get isCompleted => _processingState == AudioProcessingState.completed;
@@ -229,7 +241,7 @@ final class PlaybackController extends ChangeNotifier {
         _completionArmed = true;
         notifyListeners();
       } on Object {
-        _setError();
+        _handlePlayerError();
       }
       return;
     }
@@ -246,6 +258,7 @@ final class PlaybackController extends ChangeNotifier {
   }
 
   Future<void> _loadEntry(PlaybackQueueEntry entry) async {
+    _invalidateRecovery(clearReloadRequirement: true);
     final generation = ++_sourceGeneration;
     _requestedTrack = entry.track;
     _requestedAudioUri = entry.audioUri;
@@ -254,6 +267,7 @@ final class PlaybackController extends ChangeNotifier {
     _acceptPlayerEvents = false;
     _completionArmed = true;
     _isPlaying = false;
+    _playbackRequested = true;
     _position = Duration.zero;
     _playerDuration = null;
     _error = null;
@@ -281,7 +295,7 @@ final class PlaybackController extends ChangeNotifier {
       _startPlaying(generation);
     } on Object {
       if (generation == _sourceGeneration && currentEntry?.id == entry.id) {
-        _setError();
+        _setError(sourceNeedsReload: true);
       }
     }
   }
@@ -290,11 +304,16 @@ final class PlaybackController extends ChangeNotifier {
     if (!canControlPlayback) {
       return;
     }
-    await (_isPlaying ? pause() : play());
+    await (isPlaying ? pause() : play());
   }
 
   Future<void> play() async {
-    if (!canControlPlayback || _isPlaying) {
+    if (!canControlPlayback || isPlaying) {
+      return;
+    }
+    _playbackRequested = true;
+    if (_sourceNeedsReload) {
+      _beginRecovery();
       return;
     }
     try {
@@ -307,18 +326,29 @@ final class PlaybackController extends ChangeNotifier {
       }
       _startPlaying(_sourceGeneration);
     } on Object {
-      _setError();
+      _handlePlayerError();
     }
   }
 
   Future<void> pause() async {
-    if (!canControlPlayback || !_isPlaying) {
+    if (!canControlPlayback ||
+        (!_isPlaying && !_isReconnecting && !_playbackRequested)) {
       return;
     }
+    final wasRecovering = _isReconnecting || _sourceNeedsReload;
+    _playbackRequested = false;
+    _invalidateRecovery(clearReloadRequirement: false);
+    _isPlaying = false;
+    if (wasRecovering) {
+      _processingState = AudioProcessingState.ready;
+    }
+    notifyListeners();
     try {
       await _player.pause();
     } on Object {
-      _setError();
+      if (!wasRecovering) {
+        _setError(sourceNeedsReload: true);
+      }
     }
   }
 
@@ -335,11 +365,12 @@ final class PlaybackController extends ChangeNotifier {
       }
       notifyListeners();
     } on Object {
-      _setError();
+      _handlePlayerError();
     }
   }
 
   Future<void> retry() async {
+    _invalidateRecovery(clearReloadRequirement: true);
     final entry = currentEntry;
     if (entry != null) {
       await _loadEntry(entry);
@@ -354,6 +385,7 @@ final class PlaybackController extends ChangeNotifier {
 
   Future<void> stopAndReset() async {
     _sourceGeneration += 1;
+    _invalidateRecovery(clearReloadRequirement: true);
     _acceptPlayerEvents = false;
     _completionArmed = true;
     _queue.clear();
@@ -364,6 +396,7 @@ final class PlaybackController extends ChangeNotifier {
     _requestedTrack = null;
     _requestedAudioUri = null;
     _isPlaying = false;
+    _playbackRequested = false;
     _processingState = AudioProcessingState.idle;
     _position = Duration.zero;
     _playerDuration = null;
@@ -383,6 +416,7 @@ final class PlaybackController extends ChangeNotifier {
     }
     _processingState = AudioProcessingState.completed;
     _isPlaying = false;
+    _playbackRequested = false;
     _completionArmed = false;
     notifyListeners();
     switch (_repeatMode) {
@@ -421,11 +455,12 @@ final class PlaybackController extends ChangeNotifier {
       _position = Duration.zero;
       _processingState = AudioProcessingState.ready;
       _completionArmed = true;
+      _playbackRequested = true;
       notifyListeners();
       _startPlaying(generation);
     } on Object {
       if (generation == _sourceGeneration) {
-        _setError();
+        _handlePlayerError();
       }
     }
   }
@@ -439,18 +474,149 @@ final class PlaybackController extends ChangeNotifier {
       );
 
   void _startPlaying(int generation) {
+    _playbackRequested = true;
     unawaited(
       _player.play().catchError((Object _) {
         if (generation == _sourceGeneration) {
-          _setError();
+          _handlePlayerError();
         }
       }),
     );
   }
 
-  void _setError() {
+  void _handlePlayerError() {
+    if (_canAutomaticallyRecover) {
+      _beginRecovery();
+      return;
+    }
+    _setError(sourceNeedsReload: true);
+  }
+
+  bool get _canAutomaticallyRecover =>
+      recoveryPolicy.enabled &&
+      !_isReconnecting &&
+      _playbackRequested &&
+      _track != null &&
+      _audioUri != null &&
+      currentEntry != null &&
+      !isCompleted;
+
+  void _beginRecovery() {
+    final canReloadAfterPause =
+        _sourceNeedsReload &&
+        _playbackRequested &&
+        recoveryPolicy.enabled &&
+        !_isReconnecting;
+    if (!_canAutomaticallyRecover && !canReloadAfterPause) {
+      return;
+    }
+    final entry = currentEntry;
+    if (entry == null || _track == null || _audioUri == null) {
+      _setError(sourceNeedsReload: true);
+      return;
+    }
+    final sourceGeneration = _sourceGeneration;
+    final recoveryGeneration = ++_recoveryGeneration;
+    final resumePosition = _position;
     _acceptPlayerEvents = false;
     _isPlaying = false;
+    _isReconnecting = true;
+    _sourceNeedsReload = true;
+    _error = null;
+    _processingState = AudioProcessingState.buffering;
+    notifyListeners();
+    unawaited(
+      _recoverCurrentEntry(
+        entry,
+        sourceGeneration,
+        recoveryGeneration,
+        resumePosition,
+      ),
+    );
+  }
+
+  Future<void> _recoverCurrentEntry(
+    PlaybackQueueEntry entry,
+    int sourceGeneration,
+    int recoveryGeneration,
+    Duration resumePosition,
+  ) async {
+    final delays = recoveryPolicy.retryDelays;
+    for (var attempt = 0; attempt < delays.length; attempt += 1) {
+      try {
+        await _recoveryDelay(delays[attempt]);
+        if (!_isCurrentRecovery(entry, sourceGeneration, recoveryGeneration)) {
+          return;
+        }
+        final duration = await _player
+            .setUrl(entry.audioUri)
+            .timeout(recoveryPolicy.attemptTimeout);
+        if (!_isCurrentRecovery(entry, sourceGeneration, recoveryGeneration)) {
+          return;
+        }
+        final effective = duration ?? _playerDuration ?? entry.track.duration;
+        final restoredPosition = _clamp(
+          resumePosition,
+          Duration.zero,
+          effective,
+        );
+        await _player.seek(restoredPosition);
+        if (!_isCurrentRecovery(entry, sourceGeneration, recoveryGeneration)) {
+          return;
+        }
+
+        if (duration != null && duration > Duration.zero) {
+          _playerDuration = duration;
+        }
+        _position = restoredPosition;
+        _acceptPlayerEvents = true;
+        _isReconnecting = false;
+        _sourceNeedsReload = false;
+        _processingState = AudioProcessingState.ready;
+        _error = null;
+        notifyListeners();
+        if (_playbackRequested) {
+          _startPlaying(sourceGeneration);
+        }
+        return;
+      } on Object {
+        if (!_isCurrentRecovery(entry, sourceGeneration, recoveryGeneration)) {
+          return;
+        }
+        if (attempt == delays.length - 1) {
+          _setError(sourceNeedsReload: true);
+          return;
+        }
+      }
+    }
+  }
+
+  bool _isCurrentRecovery(
+    PlaybackQueueEntry entry,
+    int sourceGeneration,
+    int recoveryGeneration,
+  ) =>
+      sourceGeneration == _sourceGeneration &&
+      recoveryGeneration == _recoveryGeneration &&
+      currentEntry?.id == entry.id &&
+      _isReconnecting &&
+      _playbackRequested;
+
+  void _invalidateRecovery({required bool clearReloadRequirement}) {
+    _recoveryGeneration += 1;
+    _isReconnecting = false;
+    if (clearReloadRequirement) {
+      _sourceNeedsReload = false;
+    }
+  }
+
+  void _setError({required bool sourceNeedsReload}) {
+    _recoveryGeneration += 1;
+    _acceptPlayerEvents = false;
+    _isPlaying = false;
+    _playbackRequested = false;
+    _isReconnecting = false;
+    _sourceNeedsReload = sourceNeedsReload;
     _processingState = AudioProcessingState.idle;
     _error = 'This track could not be played.';
     notifyListeners();
@@ -469,6 +635,7 @@ final class PlaybackController extends ChangeNotifier {
   @override
   void dispose() {
     _sourceGeneration += 1;
+    _invalidateRecovery(clearReloadRequirement: true);
     _acceptPlayerEvents = false;
     _queue.clear();
     _currentIndex = -1;

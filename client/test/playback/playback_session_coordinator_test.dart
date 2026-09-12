@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:arion_client/playback/audio_interruption_port.dart';
+import 'package:arion_client/playback/audio_player_port.dart';
 import 'package:arion_client/playback/playback_controller.dart';
 import 'package:arion_client/playback/playback_session_coordinator.dart';
 import 'package:arion_client/playback/playback_recovery_policy.dart';
@@ -255,6 +256,47 @@ void main() {
     expect(recoveryPlayer.setUrlCalls, 1);
     expect(recoveryPlayer.disposed, isTrue);
     expect(recoverySession.controller, isNull);
+  });
+
+  test('projects reconnecting playback as pause-capable buffering', () async {
+    final recoveryDelay = Completer<void>();
+    final recoveryPlayer = FakeAudioPlayer();
+    final recoveryMedia = RecordingSystemMediaPort();
+    final recoverySession = PlaybackSessionCoordinator(
+      createAudioPlayer: () => recoveryPlayer,
+      systemMedia: recoveryMedia,
+      recoveryPolicy: const PlaybackRecoveryPolicy(
+        retryDelays: [Duration(seconds: 1)],
+        attemptTimeout: Duration(seconds: 1),
+      ),
+      recoveryDelay: (_) => recoveryDelay.future,
+    );
+    addTearDown(recoverySession.close);
+    await recoverySession.initialize();
+    final controller = (await recoverySession.replaceSession(
+      configured: true,
+    ))!;
+    await controller.playNow(sampleTrack(), Uri.parse('http://server/audio/1'));
+    recoveryPlayer.positions.add(const Duration(seconds: 12));
+    recoveryPlayer.errors.add(StateError('network lost'));
+    await _settle();
+
+    final reconnecting = recoveryMedia.published.last;
+    expect(reconnecting.processingState, AudioProcessingState.buffering);
+    expect(reconnecting.playing, isTrue);
+    expect(reconnecting.position, const Duration(seconds: 12));
+    expect(reconnecting.canPause, isTrue);
+    expect(reconnecting.canPlay, isFalse);
+
+    recoveryMedia.send(const SystemMediaCommand(SystemMediaCommandType.pause));
+    await _settle();
+    final paused = recoveryMedia.published.last;
+    expect(controller.isReconnecting, isFalse);
+    expect(paused.playing, isFalse);
+    expect(paused.canPause, isFalse);
+    expect(paused.canPlay, isTrue);
+
+    recoveryDelay.complete();
   });
 }
 

@@ -12,8 +12,8 @@
 
 ## 3. Player and System-Media Presentation
 
-- [ ] 3.1 Show a reconnecting state while retaining the selected track, position, and a usable pause control, and verify widget tests cover recovery start, cancellation, success, and exhausted-error presentation
-- [ ] 3.2 Project recovery as pause-capable buffering through the existing Android media session, and verify media/coordinator tests cover notification and lock-screen state without creating a second playback authority
+- [x] 3.1 Show a reconnecting state while retaining the selected track, position, and a usable pause control, and verify widget tests cover recovery start, cancellation, success, and exhausted-error presentation
+- [x] 3.2 Project recovery as pause-capable buffering through the existing Android media session, and verify media/coordinator tests cover notification and lock-screen state without creating a second playback authority
 
 ## 4. Regression and Device Verification
 

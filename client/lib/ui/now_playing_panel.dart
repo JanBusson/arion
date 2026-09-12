@@ -51,9 +51,12 @@ final class NowPlayingPanel extends StatelessWidget {
                               style: Theme.of(context).textTheme.titleMedium,
                             ),
                             Text(
-                              controller.isLoadingSelection
+                              controller.isReconnecting
+                                  ? 'Reconnecting audio\u2026'
+                                  : controller.isLoadingSelection
                                   ? 'Loading audio\u2026'
                                   : '${track.artist} \u2022 ${track.album}',
+                              key: const Key('playback-status'),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),

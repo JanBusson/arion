@@ -6,6 +6,7 @@ import 'package:arion_client/library/library_controller.dart';
 import 'package:arion_client/library/track.dart';
 import 'package:arion_client/playback/audio_player_port.dart';
 import 'package:arion_client/playback/playback_controller.dart';
+import 'package:arion_client/playback/playback_recovery_policy.dart';
 import 'package:arion_client/ui/library_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,12 +19,18 @@ void main() {
     required FakeCatalogApi api,
     required FakeAudioPlayer player,
     Size size = const Size(400, 800),
+    PlaybackRecoveryPolicy recoveryPolicy = PlaybackRecoveryPolicy.disabled,
+    PlaybackRecoveryDelay recoveryDelay = defaultPlaybackRecoveryDelay,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final playback = PlaybackController(player);
+    final playback = PlaybackController(
+      player,
+      recoveryPolicy: recoveryPolicy,
+      recoveryDelay: recoveryDelay,
+    );
     await tester.pumpWidget(
       MaterialApp(
         home: LibraryScreen(
@@ -453,4 +460,62 @@ void main() {
       expect(find.text('This track could not be played.'), findsNothing);
     },
   );
+
+  testWidgets('reconnecting playback remains visible and pauseable', (
+    tester,
+  ) async {
+    final recoveryGate = Completer<void>();
+    final track = sampleTrack();
+    final api = FakeCatalogApi(
+      handler: (limit, offset, query) async =>
+          TrackPage(items: [track], total: 1, limit: limit, offset: offset),
+    );
+    final player = FakeAudioPlayer();
+    final playback = await pumpLibrary(
+      tester,
+      api: api,
+      player: player,
+      recoveryPolicy: const PlaybackRecoveryPolicy(
+        retryDelays: [Duration(seconds: 1)],
+        attemptTimeout: Duration(seconds: 1),
+      ),
+      recoveryDelay: (_) => recoveryGate.future,
+    );
+    await playback.playNow(track, api.audioUri(track.id));
+    player.positions.add(const Duration(seconds: 35));
+    await tester.pump();
+
+    player.errors.add(StateError('network lost'));
+    await tester.pump();
+
+    expect(find.text('Reconnecting audio\u2026'), findsOneWidget);
+    expect(find.text(track.title), findsWidgets);
+    expect(find.text('0:35'), findsOneWidget);
+    expect(find.byTooltip('Pause'), findsOneWidget);
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(const Key('playback-toggle')))
+          .onPressed,
+      isNotNull,
+    );
+
+    await tester.tap(find.byKey(const Key('playback-toggle')));
+    await tester.pump();
+    expect(playback.isReconnecting, isFalse);
+    expect(find.text('Reconnecting audio\u2026'), findsNothing);
+
+    recoveryGate.complete();
+    await playback.play();
+    await tester.pumpAndSettle();
+    expect(playback.isReconnecting, isFalse);
+    expect(playback.position, const Duration(seconds: 35));
+    expect(player.playbackStarts, 2);
+
+    player.setUrlHandler = (_, _) async => throw StateError('still offline');
+    player.errors.add(StateError('network lost again'));
+    await tester.pumpAndSettle();
+    expect(find.text('Reconnecting audio\u2026'), findsNothing);
+    expect(find.text('This track could not be played.'), findsOneWidget);
+    expect(find.byKey(const Key('playback-retry')), findsOneWidget);
+  });
 }

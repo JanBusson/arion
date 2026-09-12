@@ -10,6 +10,7 @@ abstract interface class AudioPlayerPort {
   Future<Duration?> setUrl(Uri uri);
   Future<void> play();
   Future<void> pause();
+  Future<void> stop();
   Future<void> seek(Duration position);
   Future<void> dispose();
 }

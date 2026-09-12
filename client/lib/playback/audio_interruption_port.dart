@@ -7,3 +7,19 @@ abstract interface class AudioInterruptionPort {
   Future<void> configureForMusic();
   Future<void> dispose();
 }
+
+final class NoopAudioInterruptionPort implements AudioInterruptionPort {
+  const NoopAudioInterruptionPort();
+
+  @override
+  Stream<AudioInterruptionKind> get interruptions => const Stream.empty();
+
+  @override
+  Stream<void> get becomingNoisy => const Stream.empty();
+
+  @override
+  Future<void> configureForMusic() async {}
+
+  @override
+  Future<void> dispose() async {}
+}

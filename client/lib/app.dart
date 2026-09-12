@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'configuration/api_base_url.dart';
@@ -8,6 +10,7 @@ import 'library/acquisition_job_store.dart';
 import 'library/library_controller.dart';
 import 'playback/audio_player_port.dart';
 import 'playback/playback_controller.dart';
+import 'playback/playback_session_coordinator.dart';
 import 'ui/library_screen.dart';
 import 'ui/settings_screen.dart';
 
@@ -19,6 +22,7 @@ final class ArionApp extends StatefulWidget {
     required this.settingsStore,
     required this.catalogApiFactory,
     required this.audioPlayerFactory,
+    this.playbackSession,
     this.acquisitionJobStore,
     this.seedBaseUrl = const String.fromEnvironment('ARION_API_BASE_URL'),
     super.key,
@@ -27,6 +31,7 @@ final class ArionApp extends StatefulWidget {
   final SettingsStore settingsStore;
   final CatalogApiFactory catalogApiFactory;
   final AudioPlayerFactory audioPlayerFactory;
+  final PlaybackSessionCoordinator? playbackSession;
   final AcquisitionJobStore? acquisitionJobStore;
   final String seedBaseUrl;
 
@@ -37,7 +42,10 @@ final class ArionApp extends StatefulWidget {
 final class _ArionAppState extends State<ArionApp> {
   late final SettingsController _settings;
   late final AcquisitionJobStore _jobStore;
+  late final PlaybackSessionCoordinator _playbackSession;
+  late final bool _ownsPlaybackSession;
   _ClientSession? _session;
+  int _replacementGeneration = 0;
 
   @override
   void initState() {
@@ -47,39 +55,53 @@ final class _ArionAppState extends State<ArionApp> {
       seedBaseUrl: widget.seedBaseUrl,
     );
     _jobStore = widget.acquisitionJobStore ?? MemoryAcquisitionJobStore();
+    _ownsPlaybackSession = widget.playbackSession == null;
+    _playbackSession =
+        widget.playbackSession ??
+        PlaybackSessionCoordinator(
+          createAudioPlayer: widget.audioPlayerFactory,
+        );
     _loadSettings();
   }
 
   Future<void> _loadSettings() async {
+    await _playbackSession.initialize();
     await _settings.load();
     if (!mounted) {
       return;
     }
-    _replaceSession(_settings.baseUrl);
+    await _replaceSession(_settings.baseUrl);
   }
 
   Future<bool> _saveServer(String value) async {
     final saved = await _settings.save(value);
     if (saved && mounted) {
-      _replaceSession(_settings.baseUrl);
+      await _replaceSession(_settings.baseUrl);
     }
     return saved;
   }
 
-  void _replaceSession(ApiBaseUrl? baseUrl) {
+  Future<void> _replaceSession(ApiBaseUrl? baseUrl) async {
+    final generation = ++_replacementGeneration;
     final oldSession = _session;
     setState(() {
-      _session = baseUrl == null
-          ? null
-          : _ClientSession(
-              library: LibraryController(
-                widget.catalogApiFactory(baseUrl),
-                jobStore: _jobStore,
-              ),
-              playback: PlaybackController(widget.audioPlayerFactory()),
-            );
+      _session = null;
     });
     oldSession?.dispose();
+    final playback = await _playbackSession.replaceSession(
+      configured: baseUrl != null,
+    );
+    if (!mounted || generation != _replacementGeneration) return;
+    if (baseUrl == null || playback == null) return;
+    setState(() {
+      _session = _ClientSession(
+        library: LibraryController(
+          widget.catalogApiFactory(baseUrl),
+          jobStore: _jobStore,
+        ),
+        playback: playback,
+      );
+    });
   }
 
   Future<void> _showSettings(BuildContext dialogContext) async {
@@ -135,7 +157,11 @@ final class _ArionAppState extends State<ArionApp> {
 
   @override
   void dispose() {
+    _replacementGeneration += 1;
     _session?.dispose();
+    if (_ownsPlaybackSession) {
+      unawaited(_playbackSession.close());
+    }
     _settings.dispose();
     super.dispose();
   }
@@ -151,6 +177,5 @@ final class _ClientSession {
 
   void dispose() {
     library.dispose();
-    playback.dispose();
   }
 }

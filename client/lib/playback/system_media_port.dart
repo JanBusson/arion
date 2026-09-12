@@ -79,3 +79,19 @@ abstract interface class SystemMediaPort {
   Future<void> clear();
   Future<void> dispose();
 }
+
+final class NoopSystemMediaPort implements SystemMediaPort {
+  const NoopSystemMediaPort();
+
+  @override
+  Stream<SystemMediaCommand> get commands => const Stream.empty();
+
+  @override
+  Future<void> publish(SystemMediaSnapshot snapshot) async {}
+
+  @override
+  Future<void> clear() async {}
+
+  @override
+  Future<void> dispose() async {}
+}

@@ -118,6 +118,9 @@ final class JustAudioAdapter implements AudioPlayerPort {
   Future<void> pause() => _engine.pause();
 
   @override
+  Future<void> stop() => _engine.stop();
+
+  @override
   Future<void> seek(Duration position) => _engine.seek(position);
 
   void _bindEngine(AudioPlayerEngine engine, int generation) {
@@ -211,7 +214,7 @@ final class AudioSourceSupersededException implements Exception {
 }
 
 final class _JustAudioEngine implements AudioPlayerEngine {
-  _JustAudioEngine() : _player = AudioPlayer() {
+  _JustAudioEngine() : _player = AudioPlayer(handleInterruptions: false) {
     _eventSubscription = _player.playbackEventStream.listen(
       (_) {},
       onError: (Object error, StackTrace _) => _errors.add(error),

@@ -145,14 +145,23 @@ final class _LibraryScreenState extends State<LibraryScreen> {
                   onPlay: (track) => widget.playback.playNow(
                     track,
                     widget.api.audioUri(track.id),
+                    artworkUri: track.hasCover
+                        ? widget.api.coverUri(track.id)
+                        : null,
                   ),
                   onPlayNext: (track) => widget.playback.playNext(
                     track,
                     widget.api.audioUri(track.id),
+                    artworkUri: track.hasCover
+                        ? widget.api.coverUri(track.id)
+                        : null,
                   ),
                   onAddToQueue: (track) => widget.playback.addToQueue(
                     track,
                     widget.api.audioUri(track.id),
+                    artworkUri: track.hasCover
+                        ? widget.api.coverUri(track.id)
+                        : null,
                   ),
                   onDiscoverYouTube: widget.library.discoverYouTube,
                   onSelectCandidate: _confirmAcquisition,

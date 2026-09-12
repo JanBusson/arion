@@ -12,11 +12,13 @@ final class PlaybackQueueEntry {
     required this.id,
     required this.track,
     required this.audioUri,
+    this.artworkUri,
   });
 
   final int id;
   final Track track;
   final Uri audioUri;
+  final Uri? artworkUri;
 }
 
 final class PlaybackController extends ChangeNotifier {
@@ -128,11 +130,11 @@ final class PlaybackController extends ChangeNotifier {
           _currentIndex > 0 ||
           (_repeatMode == PlaybackRepeatMode.all && _queue.length > 1));
 
-  Future<void> selectAndPlay(Track track, Uri audioUri) =>
-      playNow(track, audioUri);
+  Future<void> selectAndPlay(Track track, Uri audioUri, {Uri? artworkUri}) =>
+      playNow(track, audioUri, artworkUri: artworkUri);
 
-  Future<void> playNow(Track track, Uri audioUri) async {
-    final entry = _newEntry(track, audioUri);
+  Future<void> playNow(Track track, Uri audioUri, {Uri? artworkUri}) async {
+    final entry = _newEntry(track, audioUri, artworkUri);
     _queue
       ..clear()
       ..add(entry);
@@ -140,8 +142,8 @@ final class PlaybackController extends ChangeNotifier {
     await _loadEntry(entry);
   }
 
-  Future<void> playNext(Track track, Uri audioUri) async {
-    final entry = _newEntry(track, audioUri);
+  Future<void> playNext(Track track, Uri audioUri, {Uri? artworkUri}) async {
+    final entry = _newEntry(track, audioUri, artworkUri);
     if (currentEntry == null) {
       _queue
         ..clear()
@@ -154,8 +156,8 @@ final class PlaybackController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> addToQueue(Track track, Uri audioUri) async {
-    final entry = _newEntry(track, audioUri);
+  Future<void> addToQueue(Track track, Uri audioUri, {Uri? artworkUri}) async {
+    final entry = _newEntry(track, audioUri, artworkUri);
     if (currentEntry == null) {
       _queue
         ..clear()
@@ -288,19 +290,33 @@ final class PlaybackController extends ChangeNotifier {
     if (!canControlPlayback) {
       return;
     }
+    await (_isPlaying ? pause() : play());
+  }
+
+  Future<void> play() async {
+    if (!canControlPlayback || _isPlaying) {
+      return;
+    }
     try {
-      if (_isPlaying) {
+      if (isCompleted) {
         await _player.pause();
-      } else {
-        if (isCompleted) {
-          await _player.pause();
-          await _player.seek(Duration.zero);
-          _position = Duration.zero;
-          _processingState = AudioProcessingState.ready;
-          _completionArmed = true;
-        }
-        _startPlaying(_sourceGeneration);
+        await _player.seek(Duration.zero);
+        _position = Duration.zero;
+        _processingState = AudioProcessingState.ready;
+        _completionArmed = true;
       }
+      _startPlaying(_sourceGeneration);
+    } on Object {
+      _setError();
+    }
+  }
+
+  Future<void> pause() async {
+    if (!canControlPlayback || !_isPlaying) {
+      return;
+    }
+    try {
+      await _player.pause();
     } on Object {
       _setError();
     }
@@ -333,6 +349,30 @@ final class PlaybackController extends ChangeNotifier {
     final uri = _requestedAudioUri ?? _audioUri;
     if (selected != null && uri != null) {
       await playNow(selected, uri);
+    }
+  }
+
+  Future<void> stopAndReset() async {
+    _sourceGeneration += 1;
+    _acceptPlayerEvents = false;
+    _completionArmed = true;
+    _queue.clear();
+    _currentIndex = -1;
+    _repeatMode = PlaybackRepeatMode.off;
+    _track = null;
+    _audioUri = null;
+    _requestedTrack = null;
+    _requestedAudioUri = null;
+    _isPlaying = false;
+    _processingState = AudioProcessingState.idle;
+    _position = Duration.zero;
+    _playerDuration = null;
+    _error = null;
+    notifyListeners();
+    try {
+      await _player.stop();
+    } on Object {
+      // The local session is already invalidated; stopping is best-effort.
     }
   }
 
@@ -390,8 +430,13 @@ final class PlaybackController extends ChangeNotifier {
     }
   }
 
-  PlaybackQueueEntry _newEntry(Track track, Uri audioUri) =>
-      PlaybackQueueEntry(id: _nextEntryId++, track: track, audioUri: audioUri);
+  PlaybackQueueEntry _newEntry(Track track, Uri audioUri, Uri? artworkUri) =>
+      PlaybackQueueEntry(
+        id: _nextEntryId++,
+        track: track,
+        audioUri: audioUri,
+        artworkUri: artworkUri,
+      );
 
   void _startPlaying(int generation) {
     unawaited(

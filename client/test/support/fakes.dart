@@ -150,6 +150,7 @@ final class FakeAudioPlayer implements AudioPlayerPort {
   Duration? lastSeek;
   int playCalls = 0;
   int pauseCalls = 0;
+  int stopCalls = 0;
   int setUrlCalls = 0;
   int playbackStarts = 0;
   final List<Uri> requestedUrls = [];
@@ -210,6 +211,15 @@ final class FakeAudioPlayer implements AudioPlayerPort {
     transportCommands.add('pause');
     _enginePlaying = false;
     playing.add(false);
+  }
+
+  @override
+  Future<void> stop() async {
+    stopCalls += 1;
+    transportCommands.add('stop');
+    _enginePlaying = false;
+    playing.add(false);
+    processing.add(AudioProcessingState.idle);
   }
 
   @override

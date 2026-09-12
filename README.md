@@ -2,7 +2,7 @@
 
 Arion is a private, self-hosted music application and a learning project for backend, data, container, and deployment practices. The FastAPI backend imports audio, extracts metadata, stores media on the local server, exposes a searchable catalog, and streams original audio with HTTP byte-range seeking. One Flutter client connects from Android or is served through the private web gateway to search the library and play tracks.
 
-Playlists, authentication, public exposure, online metadata services, background playback, and automated deployment are not implemented yet. Experimental owner-approved YouTube acquisition is available but disabled by default.
+Playlists, authentication, public exposure, online metadata services, and automated deployment are not implemented yet. Experimental owner-approved YouTube acquisition is available but disabled by default.
 
 ## Repository structure
 
@@ -230,7 +230,23 @@ Playing a library track immediately replaces the current session queue. Use the 
 
 Previous restarts the current track after more than three seconds of playback. At or before three seconds it returns to the preceding queue entry when one exists. Repeat cycles through **off**, **all**, and **current**: off stops after the final entry, all wraps the queue, and current replays the active entry. Manual navigation remains available according to queue boundaries and is not trapped by repeat-current.
 
-The queue and repeat selection live only in the current client session. Restarting the client or changing the configured Arion server clears them. This first version does not provide shuffle, saved playlists, queue synchronization, gapless playback, or background media controls.
+The queue and repeat selection live only in the current client session. Restarting the client or changing the configured Arion server clears them. This first version does not provide shuffle, saved playlists, queue synchronization, or gapless playback.
+
+### Android background playback controls
+
+On Android, an active queue continues while Arion is in the background or the screen is locked. Android's media notification and compatible lock-screen, headset, Bluetooth, wearable, and car controls receive the active title, artist, album, cover, duration, queue position, playback position, and repeat state. They can play, pause, seek, jump forward or backward by ten seconds, and navigate to the previous or next queue entry. Previous keeps Arion's in-app behavior: after three seconds it restarts the current track; otherwise it selects the preceding entry when one exists.
+
+Repeat off, all, and current remain synchronized with Android's media session. The in-app repeat button is the guaranteed control because Android versions and manufacturer interfaces do not all expose a repeat button in the notification shade. Disconnecting wired headphones or Bluetooth pauses playback and requires an explicit resume. A temporary audio interruption resumes only if Arion had been playing; an owner-paused session and permanent focus loss never auto-resume.
+
+The queue, position, and repeat state survive activity backgrounding only while the Arion process remains alive. Force-stop, process termination, reboot, or changing the configured server resets the playback session; the saved server setting itself remains. Because LAN audio can use cleartext HTTP, notification artwork and playback still work only while the private server is reachable. Keep Arion private, and prefer HTTPS or Tailscale before remote use.
+
+Android background controls are native code/configuration and therefore require a newly built APK. A compatible APK with the same package ID and signing certificate can be installed in place with `adb install -r`; this preserves app data. Web-only deployments do not update an already installed APK.
+
+After installing a candidate APK, the interactive ADB harness backgrounds Arion and dispatches standard media commands without clearing data:
+
+```powershell
+.\scripts\verify_android_media_controls.ps1
+```
 
 Run client checks and create the web release:
 

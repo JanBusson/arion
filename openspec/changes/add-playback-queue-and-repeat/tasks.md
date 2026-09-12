@@ -36,5 +36,7 @@
 - 2026-09-12: Strengthened the manual-replay and repeat-current regression tests to emulate `just_audio` retaining its playing flag after natural completion; both focused playback suites passed (`22` tests).
 - 2026-09-12: After synchronizing the completed transport with `pause -> seek(0) -> play`, `dart format --output=none --set-exit-if-changed lib test` passed (`31` files, `0` changed), `flutter analyze` passed with no issues, and `flutter test` passed all `80` tests.
 - 2026-09-12: `flutter build web --release --no-web-resources-cdn` produced the corrected `client/build/web`. Flutter emitted only the previously documented Cupertino-icons font expectation warning.
-- Private-server browser smoke test is pending an accessible Arion server and test catalog; task 4.3 therefore remains open.
+- 2026-09-12: Built `arion-web-playback-queue:20260912-replay-fix` from commit `138a402` on the private server with `docker build --target production --tag arion-web-playback-queue:20260912-replay-fix --file client/Dockerfile .`; verified runtime user `101:101` and non-empty `index.html`, `flutter_bootstrap.js`, and `main.dart.js` before deployment.
+- 2026-09-12: Updated only the private server's `web` service with `docker compose up --detach --no-deps web`; `arion-web-1` reported healthy on the new image, and `/`, `/ready`, and `/api/v1/tracks?limit=1` succeeded. The prior image `arion-web-playback-queue:20260830` and the pre-update environment file remain available for rollback.
+- The full owner browser smoke test, including replay after natural completion, remains pending; task 4.3 therefore remains open.
 - Android APK build was deliberately not run and remains the final task after 4.3.

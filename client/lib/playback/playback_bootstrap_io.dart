@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'audio_player_port.dart';
 import 'audio_service_system_media_port.dart';
 import 'audio_session_interruption_port.dart';
+import 'just_audio_adapter.dart';
+import 'playback_audio_cache_io.dart';
 import 'playback_recovery_policy.dart';
 import 'playback_session_coordinator.dart';
 
@@ -47,3 +49,12 @@ PlaybackRecoveryPolicy playbackRecoveryPolicyFor(TargetPlatform platform) =>
     platform == TargetPlatform.android
     ? PlaybackRecoveryPolicy.android
     : PlaybackRecoveryPolicy.disabled;
+
+bool persistentPlaybackCacheEnabledFor(TargetPlatform platform) =>
+    platform == TargetPlatform.android;
+
+AudioPlayerPort createDefaultAudioPlayer() => JustAudioAdapter(
+  playbackCache: persistentPlaybackCacheEnabledFor(defaultTargetPlatform)
+      ? createAndroidPlaybackCache()
+      : null,
+);

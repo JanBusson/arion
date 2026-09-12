@@ -1,4 +1,5 @@
 import 'audio_player_port.dart';
+import 'just_audio_adapter.dart';
 import 'playback_session_coordinator.dart';
 
 Future<PlaybackSessionCoordinator> createPlaybackSession(
@@ -10,3 +11,5 @@ Future<PlaybackSessionCoordinator> createPlaybackSession(
   await session.initialize();
   return session;
 }
+
+AudioPlayerPort createDefaultAudioPlayer() => JustAudioAdapter();

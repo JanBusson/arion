@@ -18,4 +18,10 @@ void main() {
       same(PlaybackRecoveryPolicy.disabled),
     );
   });
+
+  test('enables persistent playback caching only for Android', () {
+    expect(persistentPlaybackCacheEnabledFor(TargetPlatform.android), isTrue);
+    expect(persistentPlaybackCacheEnabledFor(TargetPlatform.windows), isFalse);
+    expect(persistentPlaybackCacheEnabledFor(TargetPlatform.iOS), isFalse);
+  });
 }

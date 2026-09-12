@@ -8,6 +8,7 @@ import 'package:arion_client/playback/audio_player_port.dart';
 import 'package:arion_client/playback/just_audio_adapter.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:just_audio/just_audio.dart';
 
 const _fixtureUrl = String.fromEnvironment('ARION_AUDIO_FIXTURE_URL');
 
@@ -163,6 +164,10 @@ final class RangeRequestAudioEngine implements AudioPlayerEngine {
     _durations.add(duration);
     return duration;
   }
+
+  @override
+  Future<Duration?> setAudioSource(AudioSource source) =>
+      throw UnsupportedError('The web fixture uses direct ranged URLs.');
 
   @override
   Future<void> play() async => _playing.add(true);

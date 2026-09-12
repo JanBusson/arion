@@ -7,3 +7,6 @@ import 'playback_bootstrap_stub.dart'
 Future<PlaybackSessionCoordinator> createPlaybackSession(
   AudioPlayerPort Function() audioPlayerFactory,
 ) => platform.createPlaybackSession(audioPlayerFactory);
+
+AudioPlayerPort createDefaultAudioPlayer() =>
+    platform.createDefaultAudioPlayer();

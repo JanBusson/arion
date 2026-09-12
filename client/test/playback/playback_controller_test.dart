@@ -68,7 +68,7 @@ void main() {
   });
 
   test('replays completed audio from the beginning', () async {
-    final player = FakeAudioPlayer();
+    final player = FakeAudioPlayer(emulateJustAudioCompletionState: true);
     final controller = PlaybackController(player);
     await controller.selectAndPlay(
       sampleTrack(),
@@ -78,9 +78,12 @@ void main() {
     await Future<void>.delayed(Duration.zero);
 
     await controller.togglePlayback();
+    await Future<void>.delayed(Duration.zero);
 
     expect(player.lastSeek, Duration.zero);
     expect(player.playCalls, 2);
+    expect(player.playbackStarts, 2);
+    expect(player.transportCommands, ['play', 'pause', 'seek:0', 'play']);
   });
 
   test('replaces the source and resets visible position', () async {

@@ -33,5 +33,8 @@
 - 2026-08-29: `flutter test` passed all `80` tests.
 - 2026-08-29: `openspec.cmd validate add-playback-queue-and-repeat --strict` passed.
 - 2026-08-29: `flutter build web --release --no-web-resources-cdn` produced `client/build/web`. Flutter emitted its existing Cupertino-icons font expectation warning; no Cupertino icon references exist in `client/lib` or `client/pubspec.yaml`.
+- 2026-09-12: Strengthened the manual-replay and repeat-current regression tests to emulate `just_audio` retaining its playing flag after natural completion; both focused playback suites passed (`22` tests).
+- 2026-09-12: After synchronizing the completed transport with `pause -> seek(0) -> play`, `dart format --output=none --set-exit-if-changed lib test` passed (`31` files, `0` changed), `flutter analyze` passed with no issues, and `flutter test` passed all `80` tests.
+- 2026-09-12: `flutter build web --release --no-web-resources-cdn` produced the corrected `client/build/web`. Flutter emitted only the previously documented Cupertino-icons font expectation warning.
 - Private-server browser smoke test is pending an accessible Arion server and test catalog; task 4.3 therefore remains open.
 - Android APK build was deliberately not run and remains the final task after 4.3.

@@ -184,7 +184,7 @@ void main() {
   test(
     'repeat-current seeks without reloading and ignores duplicate completion',
     () async {
-      final player = FakeAudioPlayer();
+      final player = FakeAudioPlayer(emulateJustAudioCompletionState: true);
       final controller = PlaybackController(player);
       final track = sampleTrack(id: '1', title: 'First');
       await controller.playNow(track, audioUri('1'));
@@ -199,12 +199,15 @@ void main() {
       expect(player.lastSeek, Duration.zero);
       expect(player.setUrlCalls, 1);
       expect(player.playCalls, playCallsBeforeCompletion + 1);
+      expect(player.playbackStarts, 2);
+      expect(player.transportCommands, ['play', 'pause', 'seek:0', 'play']);
 
       player.positions.add(const Duration(seconds: 1));
       await flushEvents();
       player.processing.add(AudioProcessingState.completed);
       await flushEvents();
       expect(player.playCalls, playCallsBeforeCompletion + 2);
+      expect(player.playbackStarts, 3);
     },
   );
 

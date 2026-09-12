@@ -55,6 +55,8 @@ The controller will record whether completion has already been handled for the a
 
 Starting a new source or successfully restarting the current source resets the completion guard. Manual next and previous use explicit queue navigation and are not treated as completion, so repeat-current cannot trap manual navigation. Repeat-all supplies the boundary target for both automatic and manual wrapping.
 
+`just_audio` can retain its internal playing flag after natural completion even though the web audio element has stopped. Same-source replay will therefore explicitly pause the player before seeking to zero and playing again. This keeps the controller and transport states aligned for both repeat-current and owner-initiated replay without reloading the source.
+
 Handling completion directly inside the audio adapter was considered, but the adapter has no queue identity or repeat policy and would make source-generation ownership unclear.
 
 ### 5. Use conventional previous-button behavior with a fixed threshold

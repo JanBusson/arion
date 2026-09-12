@@ -293,6 +293,7 @@ final class PlaybackController extends ChangeNotifier {
         await _player.pause();
       } else {
         if (isCompleted) {
+          await _player.pause();
           await _player.seek(Duration.zero);
           _position = Duration.zero;
           _processingState = AudioProcessingState.ready;
@@ -369,12 +370,17 @@ final class PlaybackController extends ChangeNotifier {
       return;
     }
     try {
+      await _player.pause();
+      if (generation != _sourceGeneration) {
+        return;
+      }
       await _player.seek(Duration.zero);
       if (generation != _sourceGeneration) {
         return;
       }
       _position = Duration.zero;
       _processingState = AudioProcessingState.ready;
+      _completionArmed = true;
       notifyListeners();
       _startPlaying(generation);
     } on Object {

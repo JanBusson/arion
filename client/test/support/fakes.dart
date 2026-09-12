@@ -130,6 +130,9 @@ final class FakeAcquisitionJobStore implements AcquisitionJobStore {
 }
 
 final class FakeAudioPlayer implements AudioPlayerPort {
+  FakeAudioPlayer({this.emulateJustAudioCompletionState = false});
+
+  final bool emulateJustAudioCompletionState;
   final StreamController<bool> playing = StreamController.broadcast();
   final StreamController<AudioProcessingState> processing =
       StreamController.broadcast();
@@ -146,7 +149,10 @@ final class FakeAudioPlayer implements AudioPlayerPort {
   int playCalls = 0;
   int pauseCalls = 0;
   int setUrlCalls = 0;
+  int playbackStarts = 0;
   final List<Uri> requestedUrls = [];
+  final List<String> transportCommands = [];
+  bool _enginePlaying = false;
   bool disposed = false;
 
   @override
@@ -167,6 +173,7 @@ final class FakeAudioPlayer implements AudioPlayerPort {
   @override
   Future<Duration?> setUrl(Uri uri) async {
     setUrlCalls += 1;
+    _enginePlaying = false;
     final call = setUrlCalls;
     requestedUrls.add(uri);
     if (setUrlError != null) {
@@ -183,20 +190,29 @@ final class FakeAudioPlayer implements AudioPlayerPort {
   @override
   Future<void> play() async {
     playCalls += 1;
+    transportCommands.add('play');
+    if (emulateJustAudioCompletionState && _enginePlaying) {
+      return;
+    }
     if (playError != null) {
       throw playError!;
     }
+    _enginePlaying = true;
+    playbackStarts += 1;
     playing.add(true);
   }
 
   @override
   Future<void> pause() async {
     pauseCalls += 1;
+    transportCommands.add('pause');
+    _enginePlaying = false;
     playing.add(false);
   }
 
   @override
   Future<void> seek(Duration position) async {
+    transportCommands.add('seek:${position.inMilliseconds}');
     lastSeek = position;
     positions.add(position);
   }

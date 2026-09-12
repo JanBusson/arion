@@ -21,8 +21,14 @@
 
 ## 4. Automated and Device Verification
 
-- [ ] 4.1 Format affected Dart files and run `flutter analyze` plus the full Flutter test suite, verifying both complete without errors
-- [ ] 4.2 Build the Flutter web client and verify its existing selection, playback, seeking, queue, repeat, and manual-retry behavior compiles and passes without persistent-cache code executing
-- [ ] 4.3 After all automated regression checks pass, build the replacement Android APK as the final build step and verify the artifact is produced without a backend, database, or Docker change
+- [x] 4.1 Format affected Dart files and run `flutter analyze` plus the full Flutter test suite, verifying both complete without errors
+- [x] 4.2 Build the Flutter web client and verify its existing selection, playback, seeking, queue, repeat, and manual-retry behavior compiles and passes without persistent-cache code executing
+- [x] 4.3 After all automated regression checks pass, build the replacement Android APK as the final build step and verify the artifact is produced without a backend, database, or Docker change
 - [ ] 4.4 On a physical Android device, stream an uncached track until caching completes, disconnect Wi-Fi/mobile data, and verify arbitrary seek, manual replay, repeat-current, background playback, notification controls, and lock-screen controls continue without an audio request
 - [ ] 4.5 On the physical device, verify a complete entry is reused after a normal app restart once catalog/session state is available, while an interrupted partial cache still follows bounded reconnect/manual-retry behavior and is never presented as guaranteed offline media
+
+### Verification log
+
+- 2026-09-12: `dart format --output=none --set-exit-if-changed lib test` checked 48 files without changes, `flutter analyze --no-pub` reported no issues, and the complete Flutter suite passed all 123 tests.
+- 2026-09-12: `flutter build web --no-pub` produced `client/build/web`; Android cache implementation remains behind the native conditional bootstrap, while shared selection, playback, seeking, queue, repeat, and retry regressions passed in the complete suite.
+- 2026-09-12: Only after the automated and web gates passed, version `1.3.0+4` was built with `flutter build apk --debug --no-pub --dart-define=ARION_API_BASE_URL=http://192.168.178.110:8080`. The resulting `client/build/app/outputs/flutter-apk/app-debug.apk` is `155711343` bytes with SHA-256 `C558F7557A7D3EF5A412C1446630517C65D305F83157D5BA874E596CA4A2761D`, package ID `dev.arion.client`, and APK Signature Scheme v2 verification. Its Android Debug certificate SHA-256 is `F2F18CBE385EBEADBAA61C7C190F89AAB2405CB479E980838DBAF1EA93D217A7`, matching the previous owner-test APK signing identity.

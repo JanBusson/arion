@@ -27,8 +27,8 @@ final class PlaybackController extends ChangeNotifier {
     this._player, {
     this.sourceLoadTimeout = const Duration(seconds: 15),
     this.recoveryPolicy = PlaybackRecoveryPolicy.disabled,
-    PlaybackRecoveryDelay recoveryDelay = defaultPlaybackRecoveryDelay,
-  }) : _recoveryDelay = recoveryDelay {
+    this.recoveryDelay = defaultPlaybackRecoveryDelay,
+  }) {
     _subscriptions = [
       _player.playingStream.listen((value) {
         if (!_acceptPlayerEvents) return;
@@ -72,7 +72,7 @@ final class PlaybackController extends ChangeNotifier {
   final AudioPlayerPort _player;
   final Duration sourceLoadTimeout;
   final PlaybackRecoveryPolicy recoveryPolicy;
-  final PlaybackRecoveryDelay _recoveryDelay;
+  final PlaybackRecoveryDelay recoveryDelay;
   late final List<StreamSubscription<Object?>> _subscriptions;
 
   final List<PlaybackQueueEntry> _queue = [];
@@ -544,7 +544,7 @@ final class PlaybackController extends ChangeNotifier {
     final delays = recoveryPolicy.retryDelays;
     for (var attempt = 0; attempt < delays.length; attempt += 1) {
       try {
-        await _recoveryDelay(delays[attempt]);
+        await recoveryDelay(delays[attempt]);
         if (!_isCurrentRecovery(entry, sourceGeneration, recoveryGeneration)) {
           return;
         }

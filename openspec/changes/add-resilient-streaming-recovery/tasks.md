@@ -17,7 +17,7 @@
 
 ## 4. Regression and Device Verification
 
-- [ ] 4.1 Format the affected Dart files and run `flutter analyze` plus the full Flutter test suite, verifying both commands complete without errors
+- [x] 4.1 Format the affected Dart files and run `flutter analyze` plus the full Flutter test suite, verifying both commands complete without errors
 - [ ] 4.2 Build the Flutter web client and smoke-test selection, play/pause, seeking, queue, repeat, and manual retry in a browser, verifying Android-only recovery introduces no web regression
 - [ ] 4.3 After web verification succeeds, build the replacement Android APK and verify the artifact is produced without changing backend or database deployment
 - [ ] 4.4 On the physical Android device, verify buffered playback survives a brief outage, reconnects at the last position after a longer short outage, stops retrying on pause or source change, and reaches manual retry after a prolonged outage in foreground, background, notification, and lock-screen use

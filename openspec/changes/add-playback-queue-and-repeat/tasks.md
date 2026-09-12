@@ -23,8 +23,8 @@
 
 - [x] 4.1 Document the session-only queue actions, repeat-off/all/current behavior, three-second previous action, and explicit exclusions of shuffle and saved playlists in the client-facing README section; verify the documented labels and behavior match the implemented UI and spec.
 - [x] 4.2 Run `dart format --output=none --set-exit-if-changed lib test`, `flutter analyze`, and `flutter test` from `client`; verify all formatting, static analysis, controller, adapter, and widget checks pass.
-- [ ] 4.3 After all planned web functionality and automated checks are complete, build the production web client and smoke-test play-now, play-next, append, automatic advancement, previous/next, all repeat modes, queue reordering/removal, rapid switching, and failed-entry retry/skip against the private Arion server; record the exact commands and outcomes.
-- [ ] 4.4 Only after the web version is fully complete and verified, build the debug Android APK as the final implementation step and record the exact command and outcome before marking the change complete.
+- [x] 4.3 After all planned web functionality and automated checks are complete, build the production web client and smoke-test play-now, play-next, append, automatic advancement, previous/next, all repeat modes, queue reordering/removal, rapid switching, and failed-entry retry/skip against the private Arion server; record the exact commands and outcomes.
+- [x] 4.4 Only after the web version is fully complete and verified, build the debug Android APK as the final implementation step and record the exact command and outcome before marking the change complete.
 
 ### Verification log
 
@@ -38,5 +38,5 @@
 - 2026-09-12: `flutter build web --release --no-web-resources-cdn` produced the corrected `client/build/web`. Flutter emitted only the previously documented Cupertino-icons font expectation warning.
 - 2026-09-12: Built `arion-web-playback-queue:20260912-replay-fix` from commit `138a402` on the private server with `docker build --target production --tag arion-web-playback-queue:20260912-replay-fix --file client/Dockerfile .`; verified runtime user `101:101` and non-empty `index.html`, `flutter_bootstrap.js`, and `main.dart.js` before deployment.
 - 2026-09-12: Updated only the private server's `web` service with `docker compose up --detach --no-deps web`; `arion-web-1` reported healthy on the new image, and `/`, `/ready`, and `/api/v1/tracks?limit=1` succeeded. The prior image `arion-web-playback-queue:20260830` and the pre-update environment file remain available for rollback.
-- The full owner browser smoke test, including replay after natural completion, remains pending; task 4.3 therefore remains open.
-- Android APK build was deliberately not run and remains the final task after 4.3.
+- 2026-09-12: The owner confirmed the deployed browser functionality, including replay after natural completion, works as expected and accepted the current web feature set for the first version; task 4.3 is complete.
+- 2026-09-12: After the web acceptance, `flutter build apk --debug --dart-define=ARION_API_BASE_URL=http://192.168.178.110:8080` completed in 103.9 seconds and produced `client/build/app/outputs/flutter-apk/app-debug.apk` (`172501592` bytes, SHA-256 `202E4468F5F1ABD9F769FFAC4D6F92B446F79B4BCFA4E8311676A6A9243206E0`). Android `apksigner verify --verbose --print-certs` confirmed one Android Debug signer and APK Signature Scheme v2. No ADB device was connected, so owner-device installation and smoke testing remain a post-build acceptance step.

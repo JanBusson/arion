@@ -1,0 +1,33 @@
+## 1. Prerequisite and Dependencies
+
+- [ ] 1.1 Confirm the completed `add-playback-queue-and-repeat` implementation remains an ancestor of this stacked branch and establish a green controller/widget/web baseline; verify the relevant existing Flutter suites pass before background-lifecycle refactoring begins.
+- [ ] 1.2 Add exact compatible `audio_service` and direct `audio_session` dependencies while retaining the pinned `just_audio` engine; regenerate the lock file and verify dependency resolution reports the intended versions without unrelated upgrades.
+- [ ] 1.3 Add narrow system-media and audio-interruption ports plus recording fakes; verify isolated contract tests can observe published metadata/state and inject commands, focus changes, and becoming-noisy events without booting Android.
+
+## 2. Long-Lived Playback Session
+
+- [ ] 2.1 Introduce one playback-session/coordinator owner that retains `PlaybackController` independently of Android activity widgets; verify lifecycle tests show activity background/detach does not dispose the active source, queue, position, or repeat mode.
+- [ ] 2.2 Add platform-specific application composition so Android initializes and attaches to the long-lived media handler while web retains the existing in-process `JustAudioAdapter`; verify composition tests select exactly one authority per platform and the web build imports no Android service implementation.
+- [ ] 2.3 Route configured-server replacement and terminal session shutdown through explicit stop/dispose/reset behavior; verify tests show the old source and media state are cleared, pending generations are invalidated, the saved server changes, and the replacement session starts empty with repeat off.
+
+## 3. Media Session State and Commands
+
+- [ ] 3.1 Implement deterministic media-item and queue projection using session-local queue-entry identities, active track metadata, optional cover URLs, duration, and current index; verify tests cover duplicate tracks, source replacement, missing/failed artwork, and the absence of credentials or storage references.
+- [ ] 3.2 Project processing, play-or-pause, position, dynamic previous/next availability, seek actions, and repeat off/all/current into Android playback state; verify state-projection tests cover empty, loading, playing, paused, buffering, completed, failed, boundary, wrapped, and superseded-source states.
+- [ ] 3.3 Implement the custom audio handler's play, pause, seek, seek-forward/backward, previous, next, and supported repeat-mode callbacks by delegating only to queue-aware controller operations; verify command tests cover the three-second previous threshold, clamped seeks, repeat-all wrapping, repeat-current-independent manual navigation, unavailable actions, and synchronized in-app/system state.
+- [ ] 3.4 Keep handler broadcasts generation-safe and bounded during rapid source changes and failures; verify hostile tests show late position, duration, playing, completion, error, metadata, and command outcomes cannot republish or control a superseded queue entry.
+
+## 4. Android Service and Interruption Safety
+
+- [ ] 4.1 Configure the compatible audio-service activity, foreground media service, media-button receiver, notification channel, wake-lock permission, and target-SDK media-playback foreground-service permissions; verify the merged debug manifest contains the exact required declarations and no unrelated permission.
+- [ ] 4.2 Configure the Android audio session for music and centralize transient/permanent focus-loss and focus-gain handling; verify tests resume only playback that was active before a transient interruption and never resume an owner-paused or permanently interrupted session.
+- [ ] 4.3 Handle becoming-noisy events through the authoritative pause path and clear interruption resume intent; verify tests show wired/Bluetooth disconnection pauses once, leaves queue and position intact, updates both media surfaces, and requires explicit owner resume.
+- [ ] 4.4 Add an Android integration harness for service lifetime and media commands; verify an emulator or connected test device can background the activity, dispatch play/pause/previous/next/seek media commands, and observe consistent service and controller state before the release-candidate APK is built.
+
+## 5. Regression, Documentation, and Owner APK
+
+- [ ] 5.1 Preserve all existing queue, repeat, replay, failure, settings, narrow-layout, and browser behavior; verify `dart format --output=none --set-exit-if-changed lib test`, `flutter analyze`, and the complete `flutter test` suite pass without weakening prior assertions.
+- [ ] 5.2 Document Android notification/lock-screen/headset controls, background/session lifetime, interruption behavior, OEM-dependent repeat presentation, private-LAN constraints, and in-place signed APK updates; verify the README matches implemented labels, limitations, and commands.
+- [ ] 5.3 Build the production web client and run the existing private-server playback smoke checks after all shared-code changes; verify web play-now, queue navigation, repeat, replay, rapid switching, and ranged audio remain functional before any updated APK is built.
+- [ ] 5.4 Increment the Flutter version name/code and, only after tasks 5.1-5.3 pass, build the debug APK with the private gateway seed; verify the artifact package ID, version, size, SHA-256 digest, v2 signature, and signer digest are recorded and match the installed owner-test signing identity.
+- [ ] 5.5 Install the APK in place with `adb install -r` without clearing app data and complete the owner-phone smoke test for backgrounding, screen lock, notification controls, seek, queue navigation, repeat synchronization, output disconnection, interruption recovery, server replacement, and foreground return; record device/Android version and outcomes before marking the change complete.

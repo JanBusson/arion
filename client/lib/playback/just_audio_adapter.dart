@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 
 import 'audio_player_port.dart';
+import 'offline_audio_resolver.dart';
 import 'playback_audio_cache.dart';
 
 typedef AudioPlayerEngineFactory = AudioPlayerEngine Function();
@@ -36,6 +37,7 @@ final class JustAudioAdapter implements AudioPlayerPort {
   JustAudioAdapter({
     AudioPlayerEngine? engine,
     AudioPlayerEngineFactory? engineFactory,
+    this.offlineAudioResolver,
     this.playbackCache,
     bool? recreateOnSourceChange,
   }) : _engineFactory = engineFactory ?? _JustAudioEngine.new,
@@ -45,6 +47,7 @@ final class JustAudioAdapter implements AudioPlayerPort {
   }
 
   final AudioPlayerEngineFactory _engineFactory;
+  final OfflineAudioResolver? offlineAudioResolver;
   final PlaybackAudioCache? playbackCache;
   final bool _recreateOnSourceChange;
   AudioPlayerEngine _engine;
@@ -60,7 +63,10 @@ final class JustAudioAdapter implements AudioPlayerPort {
   final Set<Future<void>> _retiringEngines = {};
   StreamSubscription<void>? _cacheCompletionSubscription;
   PlaybackCacheSource? _activeCacheSource;
+  Uri? _activeOfflineUri;
   Uri? _activeUri;
+  Uri? _pendingOfflineInvalidationUri;
+  Uri? _pendingOfflineBypassUri;
   String? _pendingInvalidationKey;
   Uri? _pendingBypassUri;
   int? _localFailureGeneration;
@@ -93,6 +99,7 @@ final class JustAudioAdapter implements AudioPlayerPort {
     await _cacheCompletionSubscription?.cancel();
     _cacheCompletionSubscription = null;
     _activeCacheSource = null;
+    _activeOfflineUri = null;
     _activeUri = null;
     _localFailureGeneration = null;
     final replaceEngine = _recreateOnSourceChange && _hasAttemptedSource;
@@ -112,6 +119,7 @@ final class JustAudioAdapter implements AudioPlayerPort {
       }
     }
 
+    await _flushPendingOfflineInvalidation();
     await _flushPendingCacheInvalidation();
 
     if (generation != _sourceGeneration) {
@@ -147,6 +155,28 @@ final class JustAudioAdapter implements AudioPlayerPort {
     _localFailureGeneration = null;
     _activeUri = uri;
     _activeCacheSource = null;
+    _activeOfflineUri = null;
+    final bypassOffline = _pendingOfflineBypassUri == uri;
+    _pendingOfflineBypassUri = null;
+    final offline = offlineAudioResolver;
+    if (offline != null && !bypassOffline) {
+      final local = await offline.resolve(uri);
+      if (generation != _sourceGeneration || !identical(engine, _engine)) {
+        throw const AudioSourceSupersededException();
+      }
+      if (local != null) {
+        _activeOfflineUri = uri;
+        try {
+          return await engine.setAudioSource(AudioSource.file(local.path));
+        } on Object {
+          _activeOfflineUri = null;
+          await offline.invalidate(uri);
+          if (generation != _sourceGeneration || !identical(engine, _engine)) {
+            throw const AudioSourceSupersededException();
+          }
+        }
+      }
+    }
     if (cache == null) return engine.setUrl(uri);
 
     var prepared = await cache.prepare(
@@ -219,6 +249,12 @@ final class JustAudioAdapter implements AudioPlayerPort {
     if (key != null) await playbackCache?.invalidate(key);
   }
 
+  Future<void> _flushPendingOfflineInvalidation() async {
+    final uri = _pendingOfflineInvalidationUri;
+    _pendingOfflineInvalidationUri = null;
+    if (uri != null) await offlineAudioResolver?.invalidate(uri);
+  }
+
   @override
   Future<void> play() => _engine.play();
 
@@ -261,7 +297,11 @@ final class JustAudioAdapter implements AudioPlayerPort {
       return;
     }
     final active = _activeCacheSource;
-    if (active?.fromCompleteCache == true &&
+    if (_activeOfflineUri != null && _localFailureGeneration != generation) {
+      _localFailureGeneration = generation;
+      _pendingOfflineInvalidationUri = _activeOfflineUri;
+      _pendingOfflineBypassUri = _activeOfflineUri;
+    } else if (active?.fromCompleteCache == true &&
         _localFailureGeneration != generation) {
       _localFailureGeneration = generation;
       _pendingInvalidationKey = active!.key;
@@ -316,6 +356,7 @@ final class JustAudioAdapter implements AudioPlayerPort {
     }
     _engineSubscriptions = [];
     await _stopEngine(_engine);
+    await _flushPendingOfflineInvalidation();
     await _flushPendingCacheInvalidation();
     await playbackCache?.release();
     try {
@@ -325,6 +366,7 @@ final class JustAudioAdapter implements AudioPlayerPort {
     }
     await Future.wait(_retiringEngines.toList());
     await playbackCache?.dispose();
+    await offlineAudioResolver?.dispose();
     await Future.wait([
       _playing.close(),
       _processing.close(),

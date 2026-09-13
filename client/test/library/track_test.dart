@@ -1,7 +1,17 @@
 import 'package:arion_client/library/track.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/fakes.dart';
+
 void main() {
+  test('round-trips every track field through JSON', () {
+    final track = sampleTrack(hasCover: true);
+
+    final restored = Track.fromJson(track.toJson());
+
+    expect(restored.toJson(), track.toJson());
+  });
+
   Map<String, Object?> completeJson() => {
     'id': '00000000-0000-0000-0000-000000000001',
     'title': 'Title',

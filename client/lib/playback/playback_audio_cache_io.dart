@@ -1,11 +1,10 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
-import 'package:crypto/crypto.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../configuration/resource_identity.dart';
 import 'playback_audio_cache.dart';
 
 const arionPlaybackCacheMaxBytes = 1024 * 1024 * 1024;
@@ -53,9 +52,7 @@ final class PlaybackCacheManager implements PlaybackAudioCache {
   String? _protectedKey;
   bool _disposed = false;
 
-  static String keyFor(Uri uri) => sha256
-      .convert(utf8.encode(_normalizedAudioUri(uri).toString()))
-      .toString();
+  static String keyFor(Uri uri) => resourceKey(uri);
 
   Future<PlaybackCacheEntryPaths> pathsFor(Uri uri) async {
     final root = _root ?? await _rootDirectoryProvider();
@@ -126,6 +123,34 @@ final class PlaybackCacheManager implements PlaybackAudioCache {
       });
     } on Object {
       // Cache completion is opportunistic and must not interrupt playback.
+    }
+  }
+
+  @override
+  Future<int?> exportComplete(Uri uri, String destinationPath) async {
+    if (_disposed) return null;
+    try {
+      return await _enqueue(() async {
+        final root = await _initialize();
+        final source = _paths(root, keyFor(uri)).mediaFile;
+        if (!await source.exists()) return null;
+        final length = await source.length();
+        if (length <= 0) return null;
+        final destination = File(destinationPath);
+        await destination.parent.create(recursive: true);
+        final temporary = File('$destinationPath.cache-copy');
+        if (await temporary.exists()) await temporary.delete();
+        await source.copy(temporary.path);
+        if (await temporary.length() != length) {
+          await temporary.delete();
+          return null;
+        }
+        if (await destination.exists()) await destination.delete();
+        await temporary.rename(destination.path);
+        return length;
+      });
+    } on Object {
+      return null;
     }
   }
 
@@ -267,21 +292,6 @@ final class _CacheCandidate {
   final Directory directory;
   final int bytes;
   final DateTime modified;
-}
-
-Uri _normalizedAudioUri(Uri uri) {
-  final scheme = uri.scheme.toLowerCase();
-  final defaultPort =
-      (scheme == 'http' && uri.port == 80) ||
-      (scheme == 'https' && uri.port == 443);
-  return Uri(
-    scheme: scheme,
-    userInfo: uri.userInfo,
-    host: uri.host.toLowerCase(),
-    port: uri.hasPort && !defaultPort ? uri.port : null,
-    path: uri.path,
-    query: uri.hasQuery ? uri.query : null,
-  ).normalizePath();
 }
 
 String _childPath(String parent, String child) =>

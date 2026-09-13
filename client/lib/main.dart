@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'app.dart';
 import 'configuration/shared_preferences_settings_store.dart';
 import 'library/catalog_api.dart';
+import 'library/offline_library_bootstrap.dart';
 import 'library/shared_preferences_acquisition_job_store.dart';
 import 'playback/playback_bootstrap.dart';
 
@@ -18,6 +19,7 @@ Future<void> main() async {
       audioPlayerFactory: createDefaultAudioPlayer,
       playbackSession: playbackSession,
       acquisitionJobStore: SharedPreferencesAcquisitionJobStore(),
+      offlineLibraryFactory: createDefaultOfflineLibraryController,
     ),
   );
 }

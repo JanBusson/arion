@@ -21,6 +21,7 @@ abstract interface class PlaybackAudioCache {
   });
 
   Future<void> complete(String key);
+  Future<int?> exportComplete(Uri uri, String destinationPath);
   Future<void> invalidate(String key);
   Future<void> maintain();
   Future<void> release();

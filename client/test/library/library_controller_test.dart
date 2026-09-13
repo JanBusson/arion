@@ -3,12 +3,110 @@ import 'dart:async';
 import 'package:arion_client/library/catalog_api.dart';
 import 'package:arion_client/library/acquisition.dart';
 import 'package:arion_client/library/library_controller.dart';
+import 'package:arion_client/library/offline_library.dart';
 import 'package:arion_client/library/track.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fakes.dart';
 
 void main() {
+  test('falls back to a saved snapshot and searches it locally', () async {
+    final api = FakeCatalogApi(
+      handler: (_, _, _) => Future.error(
+        const CatalogException('The server could not be reached.'),
+      ),
+    );
+    final snapshot = OfflineCatalogSnapshot(
+      serverUrl: 'http://arion.test:8000',
+      savedAt: DateTime.utc(2026),
+      tracks: [
+        sampleTrack(id: 'one', title: 'Alpha'),
+        Track(
+          id: 'two',
+          title: 'Beta',
+          artist: 'Local Artist',
+          album: 'Offline Album',
+          durationMs: 1000,
+          codec: 'mp3',
+          bitrateKbps: 128,
+          sampleRateHz: 44100,
+          originalFilename: 'beta.mp3',
+          hasCover: false,
+          createdAt: DateTime.utc(2026),
+          updatedAt: DateTime.utc(2026),
+        ),
+      ],
+    );
+    final controller = LibraryController(
+      api,
+      snapshotStore: MemorySnapshotStore(snapshot),
+    );
+
+    await controller.loadInitial();
+    expect(controller.isOfflineSnapshot, isTrue);
+    expect(controller.error, isNull);
+    expect(controller.items, hasLength(2));
+
+    await controller.submitSearch('local artist');
+    expect(controller.items.single.id, 'two');
+    expect(api.calls, hasLength(1), reason: 'offline search must stay local');
+
+    await controller.clearSearch();
+    expect(controller.items, hasLength(2));
+    expect(controller.hasMore, isFalse);
+  });
+
+  test('keeps the existing retryable error when no snapshot exists', () async {
+    final controller = LibraryController(
+      FakeCatalogApi(
+        handler: (_, _, _) => Future.error(const CatalogException('offline')),
+      ),
+      snapshotStore: MemorySnapshotStore(null),
+    );
+
+    await controller.loadInitial();
+
+    expect(controller.isOfflineSnapshot, isFalse);
+    expect(controller.error, 'offline');
+  });
+
+  test(
+    'triggers synchronization only for unfiltered catalog changes',
+    () async {
+      var refreshes = 0;
+      final controller = LibraryController(
+        FakeCatalogApi(),
+        onUnfilteredCatalogChanged: () => refreshes += 1,
+      );
+
+      await controller.loadInitial();
+      await controller.submitSearch('query');
+      await controller.clearSearch();
+
+      expect(refreshes, 2);
+    },
+  );
+
+  test('completed acquisition triggers offline reconciliation', () async {
+    var refreshes = 0;
+    final controller = LibraryController(
+      FakeCatalogApi(
+        createJobHandler: (_) async => sampleAcquisitionJob(
+          state: 'completed',
+          phase: 'completed',
+          progressPercent: 100,
+          trackId: 'imported',
+        ),
+      ),
+      onUnfilteredCatalogChanged: () => refreshes += 1,
+    );
+
+    await controller.startAcquisition(sampleCandidate());
+
+    expect(controller.items.single.id, 'imported');
+    expect(refreshes, 1);
+  });
+
   test('loads populated and empty libraries', () async {
     final api = FakeCatalogApi(
       handler: (limit, offset, query) async => TrackPage(
@@ -359,4 +457,13 @@ void main() {
       expect(controller.items.single.id, 'reconnected-track');
     },
   );
+}
+
+final class MemorySnapshotStore implements OfflineCatalogSnapshotStore {
+  const MemorySnapshotStore(this.snapshot);
+
+  final OfflineCatalogSnapshot? snapshot;
+
+  @override
+  Future<OfflineCatalogSnapshot?> loadSnapshot() async => snapshot;
 }

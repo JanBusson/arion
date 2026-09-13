@@ -6,6 +6,7 @@ import 'package:arion_client/library/catalog_api.dart';
 import 'package:arion_client/library/acquisition.dart';
 import 'package:arion_client/library/acquisition_job_store.dart';
 import 'package:arion_client/library/track.dart';
+import 'package:arion_client/library/offline_library.dart';
 import 'package:arion_client/playback/audio_player_port.dart';
 import 'package:arion_client/playback/audio_interruption_port.dart';
 import 'package:arion_client/playback/system_media_port.dart';
@@ -129,6 +130,95 @@ final class FakeAcquisitionJobStore implements AcquisitionJobStore {
 
   @override
   Future<void> clearActiveJobId() async => value = null;
+}
+
+final class FakeOfflineLibraryController extends OfflineLibraryController {
+  FakeOfflineLibraryController({
+    this.supported = true,
+    this.snapshot,
+    this.enabledValue = false,
+    this.phaseValue = OfflineLibraryPhase.disabled,
+    Set<String> readyTrackIds = const {},
+    this.total = 0,
+  }) : _ready = {...readyTrackIds};
+
+  final bool supported;
+  final OfflineCatalogSnapshot? snapshot;
+  final int total;
+  bool enabledValue;
+  OfflineLibraryPhase phaseValue;
+  Set<String> _ready;
+  int initializeCalls = 0;
+  int enableCalls = 0;
+  int disableCalls = 0;
+  int synchronizeCalls = 0;
+  int retryCalls = 0;
+  bool disposed = false;
+
+  void setPhase(OfflineLibraryPhase value, {Set<String>? readyTrackIds}) {
+    phaseValue = value;
+    if (readyTrackIds != null) _ready = {...readyTrackIds};
+    notifyListeners();
+  }
+
+  @override
+  bool get isSupported => supported;
+  @override
+  bool get isEnabled => enabledValue;
+  @override
+  OfflineLibraryPhase get phase => phaseValue;
+  @override
+  int get completedCount => _ready.length;
+  @override
+  int get totalCount => total;
+  @override
+  int get activeCount => phaseValue == OfflineLibraryPhase.preparing ? 1 : 0;
+  @override
+  String? get error => phaseValue == OfflineLibraryPhase.failed ? 'failed' : null;
+  @override
+  Set<String> get readyTrackIds => Set.unmodifiable(_ready);
+
+  @override
+  Future<void> initialize() async => initializeCalls += 1;
+
+  @override
+  Future<OfflineCatalogSnapshot?> loadSnapshot() async => snapshot;
+
+  @override
+  Future<void> enable() async {
+    enableCalls += 1;
+    enabledValue = true;
+    phaseValue = total == _ready.length
+        ? OfflineLibraryPhase.ready
+        : OfflineLibraryPhase.preparing;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> disable() async {
+    disableCalls += 1;
+    enabledValue = false;
+    phaseValue = OfflineLibraryPhase.disabled;
+    _ready = {};
+    notifyListeners();
+  }
+
+  @override
+  Future<void> retry() async {
+    retryCalls += 1;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> synchronize() async {
+    synchronizeCalls += 1;
+  }
+
+  @override
+  void dispose() {
+    disposed = true;
+    super.dispose();
+  }
 }
 
 final class FakeAudioPlayer implements AudioPlayerPort {

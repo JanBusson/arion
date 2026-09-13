@@ -1,6 +1,7 @@
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 
+import '../library/offline_library_bootstrap.dart';
 import 'audio_player_port.dart';
 import 'audio_service_system_media_port.dart';
 import 'audio_session_interruption_port.dart';
@@ -54,6 +55,7 @@ bool persistentPlaybackCacheEnabledFor(TargetPlatform platform) =>
     platform == TargetPlatform.android;
 
 AudioPlayerPort createDefaultAudioPlayer() => JustAudioAdapter(
+  offlineAudioResolver: createDefaultOfflineAudioResolver(),
   playbackCache: persistentPlaybackCacheEnabledFor(defaultTargetPlatform)
       ? createAndroidPlaybackCache()
       : null,

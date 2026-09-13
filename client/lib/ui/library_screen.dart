@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../library/acquisition.dart';
 import '../library/catalog_api.dart';
 import '../library/library_controller.dart';
+import '../library/offline_library.dart';
 import '../library/track.dart';
 import '../playback/playback_controller.dart';
 import 'now_playing_panel.dart';
@@ -14,6 +15,7 @@ final class LibraryScreen extends StatefulWidget {
     required this.playback,
     required this.api,
     required this.onOpenSettings,
+    this.offline,
     super.key,
   });
 
@@ -21,6 +23,7 @@ final class LibraryScreen extends StatefulWidget {
   final PlaybackController playback;
   final CatalogApi api;
   final VoidCallback onOpenSettings;
+  final OfflineLibraryController? offline;
 
   @override
   State<LibraryScreen> createState() => _LibraryScreenState();
@@ -135,9 +138,30 @@ final class _LibraryScreenState extends State<LibraryScreen> {
                 ),
               ),
             ),
+            ListenableBuilder(
+              listenable: widget.library,
+              builder: (context, _) => widget.library.isOfflineSnapshot
+                  ? const MaterialBanner(
+                      content: Text(
+                        'Offline catalog - results may be out of date.',
+                      ),
+                      leading: Icon(Icons.cloud_off),
+                      actions: [SizedBox.shrink()],
+                    )
+                  : const SizedBox.shrink(),
+            ),
+            if (widget.offline?.isSupported == true)
+              ListenableBuilder(
+                listenable: widget.offline!,
+                builder: (context, _) =>
+                    _OfflineLibraryBanner(controller: widget.offline!),
+              ),
             Expanded(
               child: ListenableBuilder(
-                listenable: widget.library,
+                listenable: Listenable.merge([
+                  widget.library,
+                  if (widget.offline != null) widget.offline!,
+                ]),
                 builder: (context, _) => _LibraryBody(
                   controller: widget.library,
                   scrollController: _scroll,
@@ -165,6 +189,7 @@ final class _LibraryScreenState extends State<LibraryScreen> {
                   ),
                   onDiscoverYouTube: widget.library.discoverYouTube,
                   onSelectCandidate: _confirmAcquisition,
+                  offline: widget.offline,
                 ),
               ),
             ),
@@ -287,6 +312,7 @@ final class _LibraryBody extends StatelessWidget {
     required this.onAddToQueue,
     required this.onDiscoverYouTube,
     required this.onSelectCandidate,
+    this.offline,
   });
 
   final LibraryController controller;
@@ -297,6 +323,7 @@ final class _LibraryBody extends StatelessWidget {
   final ValueChanged<Track> onAddToQueue;
   final VoidCallback onDiscoverYouTube;
   final ValueChanged<YouTubeCandidate> onSelectCandidate;
+  final OfflineLibraryController? offline;
 
   @override
   Widget build(BuildContext context) {
@@ -400,6 +427,7 @@ final class _LibraryBody extends StatelessWidget {
                     onPlay: () => onPlay(track),
                     onPlayNext: () => onPlayNext(track),
                     onAddToQueue: () => onAddToQueue(track),
+                    offlineReady: offline?.isTrackReady(track.id) == true,
                   );
                 },
               ),
@@ -542,6 +570,7 @@ final class _TrackTile extends StatelessWidget {
     required this.onPlay,
     required this.onPlayNext,
     required this.onAddToQueue,
+    required this.offlineReady,
   });
 
   final Track track;
@@ -549,6 +578,7 @@ final class _TrackTile extends StatelessWidget {
   final VoidCallback onPlay;
   final VoidCallback onPlayNext;
   final VoidCallback onAddToQueue;
+  final bool offlineReady;
 
   @override
   Widget build(BuildContext context) {
@@ -576,6 +606,11 @@ final class _TrackTile extends StatelessWidget {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (offlineReady)
+              const Tooltip(
+                message: 'Available offline',
+                child: Icon(Icons.download_done, size: 20),
+              ),
             Text(track.formattedDuration),
             IconButton(
               tooltip: 'Play ${track.title}',
@@ -610,6 +645,47 @@ final class _TrackTile extends StatelessWidget {
         ),
         onTap: onPlay,
       ),
+    );
+  }
+}
+
+final class _OfflineLibraryBanner extends StatelessWidget {
+  const _OfflineLibraryBanner({required this.controller});
+
+  final OfflineLibraryController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!controller.isEnabled) return const SizedBox.shrink();
+    final (icon, text) = switch (controller.phase) {
+      OfflineLibraryPhase.disabled => (Icons.cloud_outlined, ''),
+      OfflineLibraryPhase.preparing => (
+        Icons.downloading,
+        'Preparing offline library: ${controller.completedCount}/${controller.totalCount}',
+      ),
+      OfflineLibraryPhase.ready => (
+        Icons.offline_pin,
+        'Library ready offline: ${controller.completedCount}/${controller.totalCount}',
+      ),
+      OfflineLibraryPhase.unavailable => (
+        Icons.cloud_off,
+        'Server unavailable - ${controller.completedCount}/${controller.totalCount} saved',
+      ),
+      OfflineLibraryPhase.failed => (
+        Icons.error_outline,
+        'Offline downloads need attention: ${controller.completedCount}/${controller.totalCount}',
+      ),
+    };
+    return MaterialBanner(
+      content: Text(text),
+      leading: Icon(icon),
+      actions: [
+        if (controller.phase == OfflineLibraryPhase.failed ||
+            controller.phase == OfflineLibraryPhase.unavailable)
+          TextButton(onPressed: controller.retry, child: const Text('Retry'))
+        else
+          const SizedBox.shrink(),
+      ],
     );
   }
 }

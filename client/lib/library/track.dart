@@ -31,6 +31,21 @@ final class Track {
     );
   }
 
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'title': title,
+    'artist': artist,
+    'album': album,
+    'duration_ms': durationMs,
+    'codec': codec,
+    'bitrate_kbps': bitrateKbps,
+    'sample_rate_hz': sampleRateHz,
+    'original_filename': originalFilename,
+    'has_cover': hasCover,
+    'created_at': createdAt.toUtc().toIso8601String(),
+    'updated_at': updatedAt.toUtc().toIso8601String(),
+  };
+
   final String id;
   final String title;
   final String artist;

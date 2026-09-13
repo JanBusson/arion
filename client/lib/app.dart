@@ -8,6 +8,7 @@ import 'configuration/settings_store.dart';
 import 'library/catalog_api.dart';
 import 'library/acquisition_job_store.dart';
 import 'library/library_controller.dart';
+import 'library/offline_library.dart';
 import 'playback/audio_player_port.dart';
 import 'playback/playback_controller.dart';
 import 'playback/playback_session_coordinator.dart';
@@ -16,6 +17,8 @@ import 'ui/settings_screen.dart';
 
 typedef CatalogApiFactory = CatalogApi Function(ApiBaseUrl baseUrl);
 typedef AudioPlayerFactory = AudioPlayerPort Function();
+typedef OfflineLibraryFactory =
+    OfflineLibraryController Function(ApiBaseUrl baseUrl);
 
 final class ArionApp extends StatefulWidget {
   const ArionApp({
@@ -24,6 +27,7 @@ final class ArionApp extends StatefulWidget {
     required this.audioPlayerFactory,
     this.playbackSession,
     this.acquisitionJobStore,
+    this.offlineLibraryFactory,
     this.seedBaseUrl = const String.fromEnvironment('ARION_API_BASE_URL'),
     super.key,
   });
@@ -33,6 +37,7 @@ final class ArionApp extends StatefulWidget {
   final AudioPlayerFactory audioPlayerFactory;
   final PlaybackSessionCoordinator? playbackSession;
   final AcquisitionJobStore? acquisitionJobStore;
+  final OfflineLibraryFactory? offlineLibraryFactory;
   final String seedBaseUrl;
 
   @override
@@ -87,19 +92,37 @@ final class _ArionAppState extends State<ArionApp> {
     setState(() {
       _session = null;
     });
+    if (oldSession != null &&
+        baseUrl != null &&
+        oldSession.baseUrl.toString() != baseUrl.toString()) {
+      await oldSession.offline.disable();
+    }
     oldSession?.dispose();
     final playback = await _playbackSession.replaceSession(
       configured: baseUrl != null,
     );
     if (!mounted || generation != _replacementGeneration) return;
     if (baseUrl == null || playback == null) return;
+    final offline =
+        widget.offlineLibraryFactory?.call(baseUrl) ??
+        NoopOfflineLibraryController();
+    await offline.initialize();
+    if (!mounted || generation != _replacementGeneration) {
+      offline.dispose();
+      return;
+    }
+    final library = LibraryController(
+      widget.catalogApiFactory(baseUrl),
+      jobStore: _jobStore,
+      snapshotStore: offline,
+      onUnfilteredCatalogChanged: () => unawaited(offline.synchronize()),
+    );
     setState(() {
       _session = _ClientSession(
-        library: LibraryController(
-          widget.catalogApiFactory(baseUrl),
-          jobStore: _jobStore,
-        ),
+        baseUrl: baseUrl,
+        library: library,
         playback: playback,
+        offline: offline,
       );
     });
   }
@@ -111,11 +134,22 @@ final class _ArionAppState extends State<ArionApp> {
         title: const Text('Server settings'),
         content: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 480),
-          child: ServerSettingsForm(
-            initialValue: _settings.baseUrl?.toString() ?? '',
-            settings: _settings,
-            onSave: _saveServer,
-            onSaved: () => Navigator.of(context).pop(),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ServerSettingsForm(
+                  initialValue: _settings.baseUrl?.toString() ?? '',
+                  settings: _settings,
+                  onSave: _saveServer,
+                  onSaved: () => Navigator.of(context).pop(),
+                ),
+                if (_session?.offline.isSupported == true) ...[
+                  const Divider(height: 32),
+                  OfflineLibrarySettings(controller: _session!.offline),
+                ],
+              ],
+            ),
           ),
         ),
       ),
@@ -148,6 +182,7 @@ final class _ArionAppState extends State<ArionApp> {
             library: session.library,
             playback: session.playback,
             api: session.libraryApi,
+            offline: session.offline,
             onOpenSettings: () => _showSettings(context),
           );
         },
@@ -168,14 +203,22 @@ final class _ArionAppState extends State<ArionApp> {
 }
 
 final class _ClientSession {
-  _ClientSession({required this.library, required this.playback});
+  _ClientSession({
+    required this.baseUrl,
+    required this.library,
+    required this.playback,
+    required this.offline,
+  });
 
+  final ApiBaseUrl baseUrl;
   final LibraryController library;
   final PlaybackController playback;
+  final OfflineLibraryController offline;
 
   CatalogApi get libraryApi => library.api;
 
   void dispose() {
     library.dispose();
+    offline.dispose();
   }
 }

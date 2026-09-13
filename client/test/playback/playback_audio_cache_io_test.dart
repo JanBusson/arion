@@ -103,6 +103,30 @@ void main() {
     expect(hit!.fromCompleteCache, isTrue);
   });
 
+  test('exports a complete entry without moving the cache copy', () async {
+    final cache = manager();
+    addTearDown(cache.dispose);
+    final uri = Uri.parse('http://arion.test/api/tracks/one/audio');
+    final paths = await cache.pathsFor(uri);
+    await paths.directory.create(recursive: true);
+    await paths.mediaFile.writeAsBytes([1, 2, 3]);
+    final destination = File(
+      '${sandbox.path}${Platform.pathSeparator}offline${Platform.pathSeparator}audio.part',
+    );
+
+    expect(await cache.exportComplete(uri, destination.path), 3);
+    expect(await destination.readAsBytes(), [1, 2, 3]);
+    expect(await paths.mediaFile.readAsBytes(), [1, 2, 3]);
+
+    expect(
+      await cache.exportComplete(
+        Uri.parse('http://arion.test/api/tracks/missing/audio'),
+        '${destination.path}.missing',
+      ),
+      isNull,
+    );
+  });
+
   test('prunes least-recently-used complete entries as whole groups', () async {
     final cache = manager(maxBytes: 8);
     addTearDown(cache.dispose);

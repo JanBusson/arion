@@ -1,6 +1,90 @@
 import 'package:flutter/material.dart';
 
 import '../configuration/settings_controller.dart';
+import '../library/offline_library.dart';
+
+final class OfflineLibrarySettings extends StatelessWidget {
+  const OfflineLibrarySettings({required this.controller, super.key});
+
+  final OfflineLibraryController controller;
+
+  Future<void> _setEnabled(BuildContext context, bool value) async {
+    if (value) {
+      await controller.enable();
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Remove offline library?'),
+        content: const Text(
+          'Downloaded songs and the offline catalog will be removed from this device.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const Key('confirm-disable-offline'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Remove downloads'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await controller.disable();
+  }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: controller,
+    builder: (context, _) => Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SwitchListTile(
+          key: const Key('keep-library-offline'),
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Keep library offline'),
+          subtitle: const Text(
+            'Automatically downloads every song using the current connection and private app storage.',
+          ),
+          value: controller.isEnabled,
+          onChanged: (value) => _setEnabled(context, value),
+        ),
+        if (controller.isEnabled) ...[
+          Text(_offlineStatus(controller)),
+          if (controller.phase == OfflineLibraryPhase.failed ||
+              controller.phase == OfflineLibraryPhase.unavailable)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                key: const Key('retry-offline-sync'),
+                onPressed: controller.retry,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry downloads'),
+              ),
+            ),
+        ],
+      ],
+    ),
+  );
+}
+
+String _offlineStatus(
+  OfflineLibraryController controller,
+) => switch (controller.phase) {
+  OfflineLibraryPhase.disabled => 'Offline downloads are disabled.',
+  OfflineLibraryPhase.preparing =>
+    'Preparing ${controller.completedCount}/${controller.totalCount}'
+        '${controller.activeCount > 0 ? ' (${controller.activeCount} active)' : ''}',
+  OfflineLibraryPhase.ready =>
+    'Ready offline: ${controller.completedCount}/${controller.totalCount}',
+  OfflineLibraryPhase.unavailable =>
+    'Server unavailable. ${controller.completedCount}/${controller.totalCount} saved.',
+  OfflineLibraryPhase.failed =>
+    '${controller.error ?? 'Download failed.'} ${controller.completedCount}/${controller.totalCount} saved.',
+};
 
 final class SettingsScreen extends StatelessWidget {
   const SettingsScreen({

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:arion_client/library/acquisition.dart';
 import 'package:arion_client/library/catalog_api.dart';
 import 'package:arion_client/library/library_controller.dart';
+import 'package:arion_client/library/offline_library.dart';
 import 'package:arion_client/library/track.dart';
 import 'package:arion_client/playback/audio_player_port.dart';
 import 'package:arion_client/playback/playback_controller.dart';
@@ -21,6 +22,7 @@ void main() {
     Size size = const Size(400, 800),
     PlaybackRecoveryPolicy recoveryPolicy = PlaybackRecoveryPolicy.disabled,
     PlaybackRecoveryDelay recoveryDelay = defaultPlaybackRecoveryDelay,
+    OfflineLibraryController? offline,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
@@ -38,12 +40,39 @@ void main() {
           playback: playback,
           api: api,
           onOpenSettings: () {},
+          offline: offline,
         ),
       ),
     );
     await tester.pumpAndSettle();
     return playback;
   }
+
+  testWidgets('shows compact offline readiness and per-track state', (
+    tester,
+  ) async {
+    final track = sampleTrack();
+    final offline = FakeOfflineLibraryController(
+      enabledValue: true,
+      phaseValue: OfflineLibraryPhase.ready,
+      readyTrackIds: {track.id},
+      total: 1,
+    );
+    await pumpLibrary(
+      tester,
+      api: FakeCatalogApi(
+        handler: (limit, offset, query) async =>
+            TrackPage(items: [track], total: 1, limit: limit, offset: offset),
+      ),
+      player: FakeAudioPlayer(),
+      size: const Size(360, 760),
+      offline: offline,
+    );
+
+    expect(find.text('Library ready offline: 1/1'), findsOneWidget);
+    expect(find.byTooltip('Available offline'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   for (final size in [const Size(360, 760), const Size(1280, 900)]) {
     testWidgets('populated library fits ${size.width.toInt()}px width', (

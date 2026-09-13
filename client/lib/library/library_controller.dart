@@ -5,18 +5,25 @@ import 'package:flutter/foundation.dart';
 import 'acquisition.dart';
 import 'acquisition_job_store.dart';
 import 'catalog_api.dart';
+import 'offline_library.dart';
 import 'track.dart';
+
+typedef LibraryRefreshCallback = void Function();
 
 final class LibraryController extends ChangeNotifier {
   LibraryController(
     this._api, {
     this.pageSize = 30,
     AcquisitionJobStore? jobStore,
+    this.snapshotStore,
+    this.onUnfilteredCatalogChanged,
     this.jobPollInterval = const Duration(seconds: 2),
   }) : _jobStore = jobStore ?? MemoryAcquisitionJobStore();
 
   final CatalogApi _api;
   final AcquisitionJobStore _jobStore;
+  final OfflineCatalogSnapshotStore? snapshotStore;
+  final LibraryRefreshCallback? onUnfilteredCatalogChanged;
   final int pageSize;
   final Duration jobPollInterval;
 
@@ -36,6 +43,8 @@ final class LibraryController extends ChangeNotifier {
   YouTubeDiscoveryMode _discoveryMode = YouTubeDiscoveryMode.music;
   bool _resumeStarted = false;
   bool _disposed = false;
+  bool _isOfflineSnapshot = false;
+  List<Track> _offlineSnapshotItems = const [];
 
   List<Track> get items => List.unmodifiable(_items);
   String get query => _query;
@@ -45,6 +54,7 @@ final class LibraryController extends ChangeNotifier {
   String? get error => _error;
   bool get hasMore => _items.length < _total;
   bool get isEmpty => !_isInitialLoading && _error == null && _items.isEmpty;
+  bool get isOfflineSnapshot => _isOfflineSnapshot;
   CatalogApi get api => _api;
   List<YouTubeCandidate> get candidates => List.unmodifiable(_candidates);
   bool get isDiscovering => _isDiscovering;
@@ -61,6 +71,7 @@ final class LibraryController extends ChangeNotifier {
   };
   bool get canSearchYouTube =>
       _query.isNotEmpty &&
+      !_isOfflineSnapshot &&
       isEmpty &&
       !_isDiscovering &&
       _activeJob?.isActive != true;
@@ -74,9 +85,16 @@ final class LibraryController extends ChangeNotifier {
     await load;
   }
 
-  Future<void> submitSearch(String value) => _resetAndLoad(value.trim());
+  Future<void> submitSearch(String value) {
+    final query = value.trim();
+    if (_isOfflineSnapshot) return _filterOffline(query);
+    return _resetAndLoad(query);
+  }
 
-  Future<void> clearSearch() => _resetAndLoad('');
+  Future<void> clearSearch() {
+    if (_isOfflineSnapshot) return _filterOffline('');
+    return _resetAndLoad('');
+  }
 
   Future<void> retry() => _resetAndLoad(_query);
 
@@ -104,6 +122,7 @@ final class LibraryController extends ChangeNotifier {
     }
     _isInitialLoading = true;
     _isLoadingMore = false;
+    _isOfflineSnapshot = false;
     notifyListeners();
     try {
       final page = await _api.fetchTracks(
@@ -115,13 +134,18 @@ final class LibraryController extends ChangeNotifier {
       }
       _items.addAll(_unique(page.items));
       _total = page.total;
+      if (query.isEmpty) onUnfilteredCatalogChanged?.call();
     } on CatalogException catch (error) {
       if (generation == _generation) {
-        _error = error.message;
+        if (!await _loadOfflineSnapshot(generation, query)) {
+          _error = error.message;
+        }
       }
     } on Object {
       if (generation == _generation) {
-        _error = 'The library could not be loaded.';
+        if (!await _loadOfflineSnapshot(generation, query)) {
+          _error = 'The library could not be loaded.';
+        }
       }
     } finally {
       if (generation == _generation) {
@@ -129,6 +153,49 @@ final class LibraryController extends ChangeNotifier {
         notifyListeners();
       }
     }
+  }
+
+  Future<bool> _loadOfflineSnapshot(int generation, String query) async {
+    final store = snapshotStore;
+    if (store == null) return false;
+    final snapshot = await store.loadSnapshot();
+    if (generation != _generation || snapshot == null) return false;
+    _offlineSnapshotItems = snapshot.tracks;
+    _isOfflineSnapshot = true;
+    _error = null;
+    _applyOfflineFilter(query);
+    return true;
+  }
+
+  Future<void> _filterOffline(String query) async {
+    final generation = ++_generation;
+    _query = query;
+    _discoveryGeneration += 1;
+    _candidates.clear();
+    _acquisitionError = null;
+    _error = null;
+    _isInitialLoading = false;
+    _isLoadingMore = false;
+    if (generation == _generation) {
+      _applyOfflineFilter(query);
+      notifyListeners();
+    }
+  }
+
+  void _applyOfflineFilter(String query) {
+    final needle = query.toLowerCase();
+    final filtered = needle.isEmpty
+        ? _offlineSnapshotItems
+        : _offlineSnapshotItems.where(
+            (track) =>
+                track.title.toLowerCase().contains(needle) ||
+                track.artist.toLowerCase().contains(needle) ||
+                track.album.toLowerCase().contains(needle),
+          );
+    _items
+      ..clear()
+      ..addAll(filtered);
+    _total = _items.length;
   }
 
   Future<void> discoverYouTube() async {
@@ -258,6 +325,7 @@ final class LibraryController extends ChangeNotifier {
           ..add(track);
         _total = 1;
         _error = null;
+        onUnfilteredCatalogChanged?.call();
       } on CatalogException catch (error) {
         _acquisitionError = error.message;
       }
@@ -277,7 +345,7 @@ final class LibraryController extends ChangeNotifier {
   }
 
   Future<void> loadMore() async {
-    if (_isInitialLoading || _isLoadingMore || !hasMore) {
+    if (_isOfflineSnapshot || _isInitialLoading || _isLoadingMore || !hasMore) {
       return;
     }
     final generation = _generation;

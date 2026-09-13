@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:arion_client/playback/audio_player_port.dart';
 import 'package:arion_client/playback/just_audio_adapter.dart';
+import 'package:arion_client/playback/offline_audio_resolver.dart';
 import 'package:arion_client/playback/playback_audio_cache.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio/just_audio.dart';
@@ -125,6 +126,83 @@ void main() {
     expect(cache.prepareBypasses, [false]);
     await adapter.dispose();
     expect(cache.disposed, isTrue);
+  });
+
+  test('prefers verified offline audio before cache and network', () async {
+    final engine = FakeAudioPlayerEngine(const Duration(minutes: 2));
+    final resolver = FakeOfflineAudioResolver(
+      OfflineAudioFile(key: 'offline', path: 'offline.bin', length: 10),
+    );
+    final cache = FakePlaybackAudioCache();
+    final adapter = JustAudioAdapter(
+      engine: engine,
+      offlineAudioResolver: resolver,
+      playbackCache: cache,
+    );
+
+    await adapter.setUrl(Uri.parse('http://arion.test/audio/1'));
+
+    expect(engine.currentSource, isA<UriAudioSource>());
+    expect(
+      (engine.currentSource as UriAudioSource).uri,
+      Uri.file('offline.bin'),
+    );
+    expect(engine.currentUrl, isNull);
+    expect(cache.prepareBypasses, isEmpty);
+    await adapter.dispose();
+  });
+
+  test('invalidates rejected offline audio and falls through once', () async {
+    final engine = FakeAudioPlayerEngine(const Duration(minutes: 2));
+    var calls = 0;
+    engine.setAudioSourceHandler = (_) async {
+      calls += 1;
+      if (calls == 1) throw StateError('bad offline file');
+      return const Duration(minutes: 2);
+    };
+    final resolver = FakeOfflineAudioResolver(
+      OfflineAudioFile(key: 'offline', path: 'offline.bin', length: 10),
+    );
+    final cache = FakePlaybackAudioCache()
+      ..prepared.add(cacheSource(key: 'network'));
+    final adapter = JustAudioAdapter(
+      engine: engine,
+      offlineAudioResolver: resolver,
+      playbackCache: cache,
+    );
+    final uri = Uri.parse('http://arion.test/audio/1');
+
+    await adapter.setUrl(uri);
+
+    expect(resolver.invalidated, [uri]);
+    expect(cache.prepareBypasses, [false]);
+    expect(calls, 2);
+    await adapter.dispose();
+  });
+
+  test('asynchronous offline failure bypasses local file on reload', () async {
+    final engine = FakeAudioPlayerEngine(const Duration(minutes: 2));
+    final uri = Uri.parse('http://arion.test/audio/1');
+    final resolver = FakeOfflineAudioResolver(
+      OfflineAudioFile(key: 'offline', path: 'offline.bin', length: 10),
+    );
+    final cache = FakePlaybackAudioCache()
+      ..prepared.add(cacheSource(key: 'network'));
+    final adapter = JustAudioAdapter(
+      engine: engine,
+      offlineAudioResolver: resolver,
+      playbackCache: cache,
+    );
+    await adapter.setUrl(uri);
+
+    engine.errors.add(StateError('decode failed'));
+    await Future<void>.delayed(Duration.zero);
+    await adapter.setUrl(uri);
+
+    expect(resolver.resolved, [uri]);
+    expect(resolver.invalidated, [uri]);
+    expect(cache.prepareBypasses, [false]);
+    await adapter.dispose();
   });
 
   test(
@@ -365,6 +443,9 @@ final class FakePlaybackAudioCache implements PlaybackAudioCache {
   Future<void> complete(String key) async => completed.add(key);
 
   @override
+  Future<int?> exportComplete(Uri uri, String destinationPath) async => null;
+
+  @override
   Future<void> invalidate(String key) async => invalidated.add(key);
 
   @override
@@ -372,6 +453,27 @@ final class FakePlaybackAudioCache implements PlaybackAudioCache {
 
   @override
   Future<void> release() async => releaseCalls += 1;
+
+  @override
+  Future<void> dispose() async => disposed = true;
+}
+
+final class FakeOfflineAudioResolver implements OfflineAudioResolver {
+  FakeOfflineAudioResolver(this.file);
+
+  final OfflineAudioFile? file;
+  final List<Uri> resolved = [];
+  final List<Uri> invalidated = [];
+  bool disposed = false;
+
+  @override
+  Future<OfflineAudioFile?> resolve(Uri uri) async {
+    resolved.add(uri);
+    return file;
+  }
+
+  @override
+  Future<void> invalidate(Uri uri) async => invalidated.add(uri);
 
   @override
   Future<void> dispose() async => disposed = true;

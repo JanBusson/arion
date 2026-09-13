@@ -174,7 +174,8 @@ final class FakeOfflineLibraryController extends OfflineLibraryController {
   @override
   int get activeCount => phaseValue == OfflineLibraryPhase.preparing ? 1 : 0;
   @override
-  String? get error => phaseValue == OfflineLibraryPhase.failed ? 'failed' : null;
+  String? get error =>
+      phaseValue == OfflineLibraryPhase.failed ? 'failed' : null;
   @override
   Set<String> get readyTrackIds => Set.unmodifiable(_ready);
 

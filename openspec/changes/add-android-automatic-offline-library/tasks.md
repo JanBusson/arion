@@ -36,8 +36,14 @@
 
 ## 6. Verification and Owner APK
 
-- [ ] 6.1 Format affected Dart files and run `flutter analyze` plus the complete Flutter test suite, verifying all checks pass without errors
-- [ ] 6.2 Build the Flutter web client and verify existing catalog, search, playback, queue, repeat, cache, retry, and settings behavior compiles with no durable offline synchronization executing
-- [ ] 6.3 After all automated and web gates pass, bump the Android version and build the replacement debug APK with the configured private server URL, verifying package identity, signature continuity, artifact size, and SHA-256
+- [x] 6.1 Format affected Dart files and run `flutter analyze` plus the complete Flutter test suite, verifying all checks pass without errors
+- [x] 6.2 Build the Flutter web client and verify existing catalog, search, playback, queue, repeat, cache, retry, and settings behavior compiles with no durable offline synchronization executing
+- [x] 6.3 After all automated and web gates pass, bump the Android version and build the replacement debug APK with the configured private server URL, verifying package identity, signature continuity, artifact size, and SHA-256
 - [ ] 6.4 On a physical Android device, enable offline mode on the home network, wait for matching completed/total readiness, disconnect all server access, force-stop/reopen the app, and verify browse, local search, play, arbitrary seek, replay, repeat, queue, background playback, notification controls, and lock-screen controls work without audio requests
 - [ ] 6.5 On the physical device, interrupt a download, restart and verify byte-range resume; then import/edit/delete server tracks and verify safe reconciliation, confirmed disable cleanup, and server-change isolation without losing unrelated app state
+
+### Verification log
+
+- 2026-09-13: `dart format --output=none --set-exit-if-changed lib test` reported 58 files unchanged, `flutter analyze --no-pub` reported no issues, and the complete Flutter suite passed all 156 tests.
+- 2026-09-13: `flutter build web --no-pub` completed successfully and produced `client/build/web`; the web bootstrap uses the inert offline-library implementation.
+- 2026-09-13: Only after the automated and web gates passed, version `1.4.0+5` was built with `flutter build apk --debug --no-pub --dart-define=ARION_API_BASE_URL=http://192.168.178.110:8080`. `client/build/app/outputs/flutter-apk/app-debug.apk` is `155751379` bytes with SHA-256 `16BDA6026D7CBAECE161669D8212ACE2209780C8475617F8F7482539FCA402D4`, package ID `dev.arion.client`, min/target SDK 24/36, and APK Signature Scheme v2 verification. Its Android Debug certificate SHA-256 remains `F2F18CBE385EBEADBAA61C7C190F89AAB2405CB479E980838DBAF1EA93D217A7`.

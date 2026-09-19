@@ -19,10 +19,8 @@ Verification performed on 2026-08-27 and 2026-08-29.
 ## Private deployment checks
 
 - The previous live web image is retained as `arion-web-track-fix-rollback:20260829`.
-- Only the `web` service was recreated. It is healthy at `192.168.178.110:8080` and runs image digest `sha256:9381e46aa79e2a5cf6f3592d3260441d3403ee94c0f0c7528e1146661dffa2e4`.
-- Live API Range checks returned `206 Partial Content` and `Content-Length: 1024` for two authorized tracks:
-  - Rocket Man: `Content-Range: bytes 0-1023/4556218`
-  - I Don't Like: `Content-Range: bytes 0-1023/4766196`
+- Only the `web` service was recreated. It is healthy at `<server-lan-ip>:8080` and runs image digest `sha256:9381e46aa79e2a5cf6f3592d3260441d3403ee94c0f0c7528e1146661dffa2e4`.
+- Live API Range checks returned `206 Partial Content` and `Content-Length: 1024` for two owner-supplied test tracks, with a valid `Content-Range` for each object.
 - The synchronized server source has a pre-deployment backup at `/home/deploy/arion/.deployment-backups/20260829-fix-web-track-switching`.
 - API access logging is disabled, so no per-request access-log lines were available. Automated Chrome verification captured both ranged request identities instead.
 - No controllable browser was connected to the Codex session. The owner subsequently confirmed that the deployed web app now plays the correct audible track after changing the selection; this completes the live browser regression check.

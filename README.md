@@ -1,8 +1,28 @@
 # Arion
 
-Arion is a private, self-hosted music application and a learning project for backend, data, container, and deployment practices. The FastAPI backend imports audio, extracts metadata, stores media on the local server, exposes a searchable catalog, and streams original audio with HTTP byte-range seeking. One Flutter client connects from Android or is served through the private web gateway to search the library and play tracks.
+Arion is a private, self-hosted music application and a learning project focused on backend, data, mobile, container, and deployment engineering. A FastAPI backend imports audio, extracts and stores metadata, exposes a searchable catalog, and streams original files with HTTP byte-range seeking. One Flutter client runs on Android and as a web application behind the private gateway.
 
-Playlists, authentication, public exposure, online metadata services, and automated deployment are not implemented yet. Experimental owner-approved YouTube acquisition is available but disabled by default.
+## Current status
+
+The application works end to end on a private Linux server: import and catalog APIs, ranged streaming, Flutter web delivery, Android playback, a session queue with repeat modes, background media controls, resilient streaming, and offline storage are implemented. The remaining active OpenSpec changes contain final physical-device acceptance checks; they are intentionally not marked complete until those checks are recorded.
+
+This is a single-owner showcase and learning project, not a production music service. Authentication, public exposure, playlists, and automated deployment are outside the current milestone. The server is intended to remain on a private LAN, with private remote access such as Tailscale as a possible later step.
+
+## Media and provider boundary
+
+No music or other third-party media is included in this repository. Demo and test content must be original, legally obtained, or explicitly licensed for the intended use. The MIT license covers Arion's source code only; it grants no rights to media, provider content, trademarks, or third-party dependencies.
+
+The repository contains an experimental YouTube acquisition adapter because provider integration, background jobs, validation, and failure handling were useful engineering exercises. It is disabled by default. Enabling it does not establish permission to download a work or override copyright, a provider's terms, or other applicable restrictions.
+
+## OpenSpec status
+
+Completed foundation, web-serving, playback-queue, and experimental acquisition changes are synchronized into [`openspec/specs`](openspec/specs) and archived under [`openspec/changes/archive`](openspec/changes/archive). Android offline-library, persistent-cache, background-control, and streaming-recovery changes remain under [`openspec/changes`](openspec/changes) while their final device acceptance items are open.
+
+Validate all current specifications and changes with:
+
+```bash
+openspec validate --all --strict
+```
 
 ## Repository structure
 
@@ -366,3 +386,7 @@ GitHub Actions uses hosted runners for pull requests and pushes to `main` or `ma
 - renders and checks loopback/private-LAN Compose bindings, builds the production web image, starts a disposable stack, and verifies static routes, proxying, caching, health, failure handling, and ranged playback
 
 No deployment or registry credentials are used in this milestone. See [the Linux server runbook](docs/server.md) for manual private deployment and persistent-volume operations.
+
+## License
+
+Arion's source code is available under the [MIT License](LICENSE). This license does not cover imported or streamed media.

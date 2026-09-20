@@ -142,7 +142,9 @@ jobs:
           --expected-web-port 18080
 
       - name: Build and start production stack
-        run: docker compose up --detach --build --wait --wait-timeout 240
+        run: >-
+          docker compose up --detach --build --wait --wait-timeout 240
+          db migrate api web
 
       - name: Inspect minimal unprivileged runtime
         run: |

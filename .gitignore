@@ -35,3 +35,11 @@ Thumbs.db
 *.dump
 *.sql.gz
 generated-media/
+
+# Flutter client generated state and local platform configuration
+client/.dart_tool/
+client/.flutter-plugins
+client/.flutter-plugins-dependencies
+client/build/
+client/android/local.properties
+client/android/key.properties

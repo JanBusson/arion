@@ -12,6 +12,7 @@ def test_settings_use_development_defaults(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.delenv("ARION_FFPROBE_EXECUTABLE", raising=False)
     monkeypatch.delenv("ARION_FFPROBE_TIMEOUT_SECONDS", raising=False)
     monkeypatch.delenv("ARION_RECONCILIATION_GRACE_SECONDS", raising=False)
+    monkeypatch.delenv("ARION_CORS_ORIGINS", raising=False)
 
     settings = Settings(_env_file=None)
 
@@ -22,6 +23,49 @@ def test_settings_use_development_defaults(monkeypatch: pytest.MonkeyPatch) -> N
     assert settings.ffprobe_executable == "ffprobe"
     assert settings.ffprobe_timeout_seconds == 30
     assert settings.reconciliation_grace_seconds == 3600
+    assert settings.cors_origins == []
+    assert settings.youtube_acquisition_enabled is False
+    assert settings.youtube_candidate_limit == 5
+    assert settings.youtube_max_duration_seconds == 900
+    assert settings.youtube_max_output_bytes == 100 * 1024 * 1024
+    assert settings.youtube_job_max_attempts == 2
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("http://localhost:8080", ["http://localhost:8080"]),
+        (
+            "http://localhost:8080, https://arion.test/",
+            ["http://localhost:8080", "https://arion.test"],
+        ),
+    ],
+)
+def test_settings_parse_exact_cors_origins(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: list[str]
+) -> None:
+    monkeypatch.setenv("ARION_CORS_ORIGINS", raw)
+
+    assert Settings(_env_file=None).cors_origins == expected
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "localhost:8080",
+        "ftp://arion.test",
+        "http://user:password@arion.test",
+        "http://arion.test/path",
+        "http://arion.test?query=value",
+    ],
+)
+def test_settings_reject_invalid_cors_origins(
+    monkeypatch: pytest.MonkeyPatch, origin: str
+) -> None:
+    monkeypatch.setenv("ARION_CORS_ORIGINS", origin)
+
+    with pytest.raises(ValidationError, match="cors_origins"):
+        Settings(_env_file=None)
 
 
 def test_settings_reject_invalid_log_level(
@@ -71,3 +115,28 @@ def test_settings_reject_invalid_resource_limits(
         Settings(_env_file=None)
 
     assert "private-password" not in str(error.value)
+
+
+def test_settings_require_strong_secret_when_acquisition_is_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ARION_YOUTUBE_ACQUISITION_ENABLED", "true")
+    monkeypatch.setenv("ARION_YOUTUBE_CANDIDATE_SECRET", "short")
+
+    with pytest.raises(ValidationError, match="candidate_secret"):
+        Settings(_env_file=None)
+
+    monkeypatch.setenv("ARION_YOUTUBE_CANDIDATE_SECRET", "x" * 32)
+    settings = Settings(_env_file=None)
+    assert settings.youtube_acquisition_enabled is True
+
+
+def test_settings_reject_unsafe_acquisition_limit_combinations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ARION_YOUTUBE_ACQUISITION_ENABLED", "true")
+    monkeypatch.setenv("ARION_YOUTUBE_CANDIDATE_SECRET", "x" * 32)
+    monkeypatch.setenv("ARION_YOUTUBE_MAX_OUTPUT_BYTES", "600000000")
+
+    with pytest.raises(ValidationError, match="max_output"):
+        Settings(_env_file=None)

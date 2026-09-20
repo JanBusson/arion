@@ -203,6 +203,115 @@ def test_cover_retrieval_and_missing_cases(api_context: Any) -> None:
     assert cover_key.value not in missing_object.text
 
 
+def create_streamable_track(
+    storage: LocalMediaStorage,
+    factory: sessionmaker[Session],
+    content: bytes = b"0123456789",
+) -> Track:
+    audio_stage = storage.create_staging()
+    with storage.open_for_write(audio_stage) as stream:
+        stream.write(content)
+    audio_key = storage.promote(audio_stage, "audio", ".flac")
+    with factory() as session, session.begin():
+        track = Track(
+            sha256=uuid4().hex + uuid4().hex,
+            audio_storage_key=audio_key.value,
+            title="Streamable",
+            artist="Artist",
+            album="Album",
+            duration_ms=100,
+            codec="flac",
+            bitrate_kbps=700,
+            sample_rate_hz=44100,
+            original_filename="streamable.flac",
+        )
+        session.add(track)
+    return track
+
+
+def test_audio_retrieval_and_missing_cases(api_context: Any) -> None:
+    client, storage, factory = api_context
+    content = b"complete audio bytes"
+    track = create_streamable_track(storage, factory, content)
+    missing_key = f"audio/{uuid4().hex}.flac"
+    with factory() as session, session.begin():
+        missing_object = Track(
+            sha256=uuid4().hex + uuid4().hex,
+            audio_storage_key=missing_key,
+            title="Missing object",
+            artist="Artist",
+            album="Album",
+            duration_ms=100,
+            codec="flac",
+            bitrate_kbps=None,
+            sample_rate_hz=44100,
+            original_filename="missing.flac",
+        )
+        session.add(missing_object)
+
+    response = client.get(f"/api/v1/tracks/{track.id}/audio")
+
+    assert response.status_code == 200
+    assert response.content == content
+    assert response.headers["content-type"] == "audio/flac"
+    assert response.headers["content-length"] == str(len(content))
+    assert response.headers["accept-ranges"] == "bytes"
+    assert client.get(f"/api/v1/tracks/{uuid4()}/audio").status_code == 404
+    unavailable = client.get(f"/api/v1/tracks/{missing_object.id}/audio")
+    assert unavailable.status_code == 404
+    assert missing_key not in unavailable.text
+    assert str(storage.root) not in unavailable.text
+
+
+def test_audio_single_range_forms(api_context: Any) -> None:
+    client, storage, factory = api_context
+    track = create_streamable_track(storage, factory)
+    cases = [
+        ("bytes=2-5", b"2345", "bytes 2-5/10"),
+        ("bytes=4-", b"456789", "bytes 4-9/10"),
+        ("bytes=-3", b"789", "bytes 7-9/10"),
+        ("bytes=6-99", b"6789", "bytes 6-9/10"),
+    ]
+
+    for header, expected, content_range in cases:
+        response = client.get(
+            f"/api/v1/tracks/{track.id}/audio", headers={"Range": header}
+        )
+
+        assert response.status_code == 206
+        assert response.content == expected
+        assert response.headers["content-type"] == "audio/flac"
+        assert response.headers["content-length"] == str(len(expected))
+        assert response.headers["content-range"] == content_range
+        assert response.headers["accept-ranges"] == "bytes"
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "bytes=",
+        "items=0-1",
+        "bytes=0-1,4-5",
+        "bytes=9-2",
+        "bytes=-0",
+        "bytes=10-",
+    ],
+)
+def test_audio_rejects_invalid_ranges(api_context: Any, header: str) -> None:
+    client, storage, factory = api_context
+    track = create_streamable_track(storage, factory)
+
+    response = client.get(
+        f"/api/v1/tracks/{track.id}/audio", headers={"Range": header}
+    )
+
+    assert response.status_code == 416
+    assert response.content == b""
+    assert response.headers["content-range"] == "bytes */10"
+    assert response.headers["content-length"] == "0"
+    assert response.headers["accept-ranges"] == "bytes"
+
+
 class FixedInspector:
     def inspect(self, _path: Path, _filename: str) -> InspectedMetadata:
         return InspectedMetadata(

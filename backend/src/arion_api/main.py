@@ -9,16 +9,28 @@ from uuid import UUID
 
 from fastapi import FastAPI, Query, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile
+from starlette.middleware.cors import CORSMiddleware
 
 from arion_api import __version__
+from arion_api.acquisition import AcquisitionService
+from arion_api.acquisition_provider import (
+    BoundedProcessRunner,
+    CandidateTokenSigner,
+    YouTubeDiscoveryRouter,
+    YouTubeMusicProvider,
+    YouTubeProvider,
+    unauthenticated_music_client,
+)
+from arion_api.acquisition_types import DiscoveryMode
 from arion_api.config import Settings, get_settings
 from arion_api.db import SessionFactory, create_database_engine, create_session_factory
 from arion_api.errors import (
     ArionError,
+    AudioNotFoundError,
     CoverNotFoundError,
     DuplicateTrackError,
     TrackNotFoundError,
@@ -26,9 +38,17 @@ from arion_api.errors import (
 from arion_api.metadata import MediaInspector
 from arion_api.models import Track
 from arion_api.repository import TrackRepository
-from arion_api.schemas import TrackListResponse, TrackPatch, TrackResponse
+from arion_api.schemas import (
+    AcquisitionJobCreate,
+    AcquisitionJobResponse,
+    TrackListResponse,
+    TrackPatch,
+    TrackResponse,
+    YouTubeCandidateListResponse,
+)
 from arion_api.services import ImportService, reconcile_storage
 from arion_api.storage import LocalMediaStorage, StorageKey
+from arion_api.streaming import InvalidByteRange, parse_byte_range
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +69,7 @@ def create_app(
     session_factory: SessionFactory | None = None,
     storage: LocalMediaStorage | None = None,
     inspector: MediaInspector | None = None,
+    acquisition_provider: YouTubeProvider | None = None,
 ) -> FastAPI:
     """Create the Arion API while deferring external connections until use."""
 
@@ -61,6 +82,26 @@ def create_app(
     selected_inspector = inspector or MediaInspector(
         selected_settings.ffprobe_executable,
         selected_settings.ffprobe_timeout_seconds,
+    )
+    selected_provider = acquisition_provider or YouTubeProvider(
+        selected_settings.ytdlp_executable,
+        BoundedProcessRunner(),
+        candidate_limit=selected_settings.youtube_candidate_limit,
+        discovery_timeout_seconds=selected_settings.youtube_discovery_timeout_seconds,
+        download_timeout_seconds=selected_settings.youtube_download_timeout_seconds,
+        max_duration_seconds=selected_settings.youtube_max_duration_seconds,
+        max_output_bytes=selected_settings.youtube_max_output_bytes,
+        min_free_bytes=selected_settings.youtube_min_free_bytes,
+    )
+    selected_discovery = YouTubeDiscoveryRouter(
+        YouTubeMusicProvider(
+            lambda: unauthenticated_music_client(
+                selected_settings.youtube_discovery_timeout_seconds
+            ),
+            candidate_limit=selected_settings.youtube_candidate_limit,
+            max_duration_seconds=selected_settings.youtube_max_duration_seconds,
+        ),
+        selected_provider,
     )
 
     @asynccontextmanager
@@ -79,6 +120,14 @@ def create_app(
     application = FastAPI(
         title="Arion API", version=__version__, lifespan=lifespan
     )
+    if selected_settings.cors_origins:
+        application.add_middleware(
+            CORSMiddleware,
+            allow_origins=selected_settings.cors_origins,
+            allow_methods=["GET", "HEAD", "POST"],
+            allow_headers=["Content-Type", "Range"],
+            expose_headers=["Accept-Ranges", "Content-Length", "Content-Range"],
+        )
     application.state.settings = selected_settings
     application.state.session_factory = selected_factory
     application.state.storage = selected_storage
@@ -88,6 +137,14 @@ def create_app(
         selected_storage,
         selected_inspector,
         selected_settings.max_upload_bytes,
+    )
+    application.state.acquisition_service = AcquisitionService(
+        selected_settings,
+        selected_factory,
+        selected_discovery,
+        CandidateTokenSigner(
+            selected_settings.youtube_candidate_secret.get_secret_value()
+        ),
     )
 
     @application.exception_handler(ArionError)
@@ -165,6 +222,50 @@ def create_app(
                 offset=offset,
             )
 
+    @application.get(
+        "/api/v1/acquisition/youtube/candidates",
+        response_model=YouTubeCandidateListResponse,
+    )
+    async def discover_youtube_candidates(
+        request: Request,
+        q: str = Query(min_length=1, max_length=256),
+        mode: DiscoveryMode = Query(default=DiscoveryMode.MUSIC),
+    ) -> YouTubeCandidateListResponse:
+        normalized = " ".join(q.split())
+        if not normalized:
+            return JSONResponse(  # type: ignore[return-value]
+                status_code=422,
+                content={
+                    "detail": {
+                        "code": "invalid_search_query",
+                        "message": "A non-empty search query is required.",
+                    }
+                },
+            )
+        items = await run_in_threadpool(
+            request.app.state.acquisition_service.discover, normalized, mode
+        )
+        return YouTubeCandidateListResponse(items=items)
+
+    @application.post(
+        "/api/v1/acquisition/jobs",
+        response_model=AcquisitionJobResponse,
+        status_code=202,
+    )
+    def create_acquisition_job(
+        payload: AcquisitionJobCreate, request: Request
+    ) -> AcquisitionJobResponse:
+        return request.app.state.acquisition_service.create_job(payload.candidate_id)
+
+    @application.get(
+        "/api/v1/acquisition/jobs/{job_id}",
+        response_model=AcquisitionJobResponse,
+    )
+    def get_acquisition_job(
+        job_id: UUID, request: Request
+    ) -> AcquisitionJobResponse:
+        return request.app.state.acquisition_service.get_job(job_id)
+
     @application.get("/api/v1/tracks/{track_id}", response_model=TrackResponse)
     def get_track(track_id: UUID, request: Request) -> Track:
         with request.app.state.session_factory() as session:
@@ -203,6 +304,72 @@ def create_app(
             except (OSError, ValueError):
                 raise CoverNotFoundError() from None
             return Response(content=content, media_type=track.cover_media_type)
+
+    @application.get("/api/v1/tracks/{track_id}/audio")
+    def get_audio(track_id: UUID, request: Request) -> Response:
+        with request.app.state.session_factory() as session:
+            track = TrackRepository(session).get(track_id)
+            if track is None:
+                raise TrackNotFoundError()
+            try:
+                audio_key = StorageKey(track.audio_storage_key)
+                info = request.app.state.storage.audio_info(audio_key)
+            except (OSError, ValueError):
+                raise AudioNotFoundError() from None
+
+        common_headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(info.size),
+        }
+        range_header = request.headers.get("range")
+        if range_header is None:
+            try:
+                content = (
+                    request.app.state.storage.iter_bytes(
+                        audio_key, 0, info.size - 1
+                    )
+                    if info.size
+                    else iter(())
+                )
+            except (OSError, ValueError):
+                raise AudioNotFoundError() from None
+            return StreamingResponse(
+                content,
+                status_code=200,
+                media_type=info.media_type,
+                headers=common_headers,
+            )
+
+        try:
+            selected = parse_byte_range(range_header, info.size)
+        except InvalidByteRange:
+            return Response(
+                status_code=416,
+                headers={
+                    "Accept-Ranges": "bytes",
+                    "Content-Range": f"bytes */{info.size}",
+                    "Content-Length": "0",
+                },
+            )
+
+        try:
+            content = request.app.state.storage.iter_bytes(
+                audio_key, selected.start, selected.end
+            )
+        except (OSError, ValueError):
+            raise AudioNotFoundError() from None
+        return StreamingResponse(
+            content,
+            status_code=206,
+            media_type=info.media_type,
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(selected.length),
+                "Content-Range": (
+                    f"bytes {selected.start}-{selected.end}/{info.size}"
+                ),
+            },
+        )
 
     return application
 

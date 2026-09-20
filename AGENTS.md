@@ -176,6 +176,48 @@ Do not add complexity only to imitate an enterprise system. Use industry-standar
 - Add tests for important backend behavior, especially metadata parsing and HTTP Range streaming.
 - Document commands needed to run, test, build, and deploy the project.
 
+## Git workflow
+
+Use Git history as project documentation. Changes should be easy to review, test, revert, and relate to an OpenSpec change.
+
+### Branches
+
+- Create one feature branch for each OpenSpec change before implementation begins.
+- Name it `change/<openspec-change-name>`, for example `change/serve-flutter-web-client`.
+- Keep unrelated OpenSpec changes on separate branches and do not implement substantial changes directly on `main`.
+- Small documentation-only or administrative fixes may use a short-lived `docs/<name>` or `fix/<name>` branch without an OpenSpec change.
+- Inspect the working tree before creating or switching branches. Preserve unrelated user changes and never carry them into a new branch accidentally.
+- If one unfinished change depends on another, document the dependency and either wait for the prerequisite to merge or deliberately create a stacked branch from it.
+
+### Commits
+
+- Commit throughout implementation instead of accumulating an entire OpenSpec change in one working-tree snapshot.
+- Commit when a coherent, independently understandable slice is complete and its relevant tests pass.
+- Prefer several logical commits over one large implementation commit, but do not create commits merely to increase the commit count.
+- Include `tasks.md` checkbox updates in the commit that implements and verifies the corresponding work; avoid separate checkbox-only commits.
+- Keep unrelated refactoring, formatting, generated files, and dependency updates out of feature commits unless required by the feature.
+- Never include unrelated pre-existing working-tree changes in a commit.
+- Review `git status --short`, `git diff`, and `git diff --cached` before committing.
+- Every commit should leave the repository usable whenever reasonably possible. Run focused tests for the affected behavior first.
+- Use clear imperative commit messages. Conventional prefixes such as `feat:`, `fix:`, `test:`, `docs:`, `refactor:`, `build:`, `ci:`, and `chore:` are encouraged.
+- A typical OpenSpec change has a planning-artifact commit, one or more implementation commits containing code, tests, and task updates, and a final archive commit after complete verification.
+
+### Pushing and pull requests
+
+- Do not push unless the user explicitly requests it. Local commits do not imply permission to push them.
+- Do not open, update, or merge a pull request unless the user explicitly requests it.
+- Never force-push `main` and never push incomplete or failing work to `main`.
+- Use one pull request per OpenSpec change, name the corresponding change, and summarize completed verification.
+- CI must pass before merging.
+- Preserve meaningful implementation commits. Squash temporary fixups, but do not squash an entire change by default when that would remove useful history.
+
+### Commit authorship and AI attribution
+
+- Never add AI-related authorship or attribution to commits, pull requests, changelogs, source files, documentation, or generated artifacts.
+- Do not add `Co-authored-by`, `Generated-by`, `Assisted-by`, or similar messages referring to Codex, ChatGPT, OpenAI, an AI assistant, or an agent.
+- Do not mention AI assistance in commit messages or pull-request descriptions unless the user explicitly requests that disclosure.
+- Use the existing Git author configuration. Do not change or invent an author identity.
+
 ## Current project state
 
 - Linux server is installed and reachable over SSH.

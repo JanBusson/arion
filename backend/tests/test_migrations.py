@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 from alembic import command
@@ -8,6 +9,9 @@ from alembic.config import Config
 from sqlalchemy import Engine, inspect, text
 
 from arion_api.models import Base
+
+
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_alembic_upgrade_creates_acquisition_schema(
@@ -18,7 +22,7 @@ def test_alembic_upgrade_creates_acquisition_schema(
     with postgres_engine.begin() as connection:
         connection.execute(text("DROP TABLE IF EXISTS alembic_version"))
     monkeypatch.setenv("ARION_DATABASE_URL", url)
-    configuration = Config("alembic.ini")
+    configuration = Config(str(BACKEND_ROOT / "alembic.ini"))
 
     try:
         command.upgrade(configuration, "head")
